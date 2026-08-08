@@ -68,19 +68,17 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack }: Props)
 
     const advance = (idx: number) => {
       if (idx >= STEPS.length) {
-        // All visual steps done — check if case is ready
-        const checkAndHandOff = () => {
-          if (caseReceivedRef.current && stepIdxRef.current >= STEPS.length) {
-            setTimeout(() => {
-              if (caseReceivedRef.current) {
-                onCaseReadyRef.current(caseReceivedRef.current);
-              }
-              setLoading(false);
-              loadingRef.current = false;
-            }, 500);
-          }
-        };
-        checkAndHandOff();
+        // All visual steps done — mark completion and check if case is ready
+        stepIdxRef.current = STEPS.length;
+        if (caseReceivedRef.current) {
+          setTimeout(() => {
+            if (caseReceivedRef.current) {
+              onCaseReadyRef.current(caseReceivedRef.current);
+            }
+            setLoading(false);
+            loadingRef.current = false;
+          }, 500);
+        }
         return;
       }
       setStepIdx(idx);
@@ -118,9 +116,9 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack }: Props)
         const data = (await res.json()) as GeneratedCase;
         caseReceivedRef.current = data;
 
-        // If visual steps already finished, hand off immediately.
+        // If visual steps already finished (or are on the last one), hand off.
         // Otherwise, the advance() function will check when done.
-        if (stepIdxRef.current >= STEPS.length) {
+        if (stepIdxRef.current >= STEPS.length - 1) {
           setTimeout(() => {
             if (caseReceivedRef.current) {
               onCaseReadyRef.current(caseReceivedRef.current);
