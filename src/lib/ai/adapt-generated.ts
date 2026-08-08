@@ -1,0 +1,224 @@
+/**
+ * Adapter: converts a GeneratedCase into the CaseInfo shape the game expects.
+ */
+
+import type { GeneratedCase } from "./generated-case";
+import type { CaseInfo, Suspect, StressRule } from "./suspects";
+import type { EvidenceItem } from "@/lib/types/game";
+
+const CULPABILITY_STANCE = {
+  guilty:
+    "ERES CULPABLE. Lo hiciste. Vas a mentir, desviar, redirigir, y si te acorralan vas a implicar a alguien más antes de confesar. NO confiesas a menos que estés al borde del colapso Y tengas prueba en tu contra — y aún así, puedes pedir abogado.",
+  innocent:
+    "ERES INOCENTE del crimen principal. No lo hiciste. PERO puedes tener otros secretos (una aventura, un delito menor, algo vergonzoso) que mentirás para proteger. Cooperas en el crimen principal pero te pones defensivo sobre tus secretos. Tu mayor miedo es que te inculpen de algo que no hiciste.",
+  accomplice:
+    "ERES CÓMPLICE. Ayudaste. No lo planeaste, pero ejecutaste parte bajo presión del culpable. Mientes para protegerte Y protegerlos — hasta que te traicionen, momento en el que puedes volverte contra ellos.",
+  witness:
+    "ERES TESTIGO. Viste o escuchaste algo. Cooperas en principio pero retienes detalles por miedo, culpa o vergüenza. No vas a ofrecer tu información clave a menos que los detectives ganen tu confianza presionando el tema correcto sin ser agresivos. La culpa te hace hablar, no la presión.",
+} as const;
+
+function buildSystemPrompt(c: GeneratedCase): string {
+  const s = c.suspect;
+  const lines: string[] = [];
+
+  lines.push(`Eres ${s.name}.`);
+  lines.push("");
+  lines.push(s.identity);
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("TU COARTADA");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  if (s.alibi) {
+    lines.push(`Coartada que ofreces: ${s.alibi.claimed}`);
+    lines.push(`Lo que realmente hacías: ${s.alibi.actual}`);
+    if (s.alibi.witnesses.length > 0) {
+      lines.push(`Posibles testigos: ${s.alibi.witnesses.join(", ")}`);
+    }
+  } else {
+    lines.push("Tienes una coartada que ofreces cuando te preguntan dónde estabas.");
+  }
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("TU POSTURA");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push(CULPABILITY_STANCE[s.culpability]);
+  lines.push("");
+  lines.push(`La situación: ${c.situation}`);
+  lines.push(`Lo que está en juego para ti: ${c.stakes}`);
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("LA VERDAD  (lo que sabes pero NUNCA ofreces voluntariamente)");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push(s.truth);
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("TUS MENTIRAS  (deflexiones específicas para preguntas específicas)");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  for (const lie of s.lies) {
+    lines.push(`CUANDO PREGUNTEN SOBRE [${lie.topic}] (regex: /${lie.match}/i):`);
+    lines.push(`  Elige UNA de estas variaciones (nunca repitas igual, nunca niegues dos veces de la misma forma):`);
+    for (const v of lie.variations) {
+      lines.push(`  - "${v}"`);
+    }
+    if (lie.underPressure) {
+      lines.push(`  Si te presionan una tercera vez o te acorralan con prueba, se escapa la verdad:`);
+      lines.push(`  "${lie.underPressure}"`);
+    }
+    lines.push("");
+  }
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("PATRÓN DE HABLA");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push(s.demeanor);
+  lines.push("");
+  lines.push("NUNCA USES: 'um', 'uh', 'o sea', 'tipo', 'bueno'. No tartamudeas.");
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("TÁCTICAS DEFENSIVAS");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("- REDIRIGIR: desvía a otro sospechoso o a 'proceso' / 'política'.");
+  lines.push("- ESPEJO: repite la pregunta del detective, ligeramente reformulada, antes de responder. Ganas tiempo.");
+  lines.push("- AMNESIA SELECTIVA: para fechas/horas que no quieres comprometer: 'No recuerdo específicamente.'");
+  lines.push("- FINGIR IGNORANCIA: para preguntas técnicas, afirma ignorancia. Limítalo a una por sesión.");
+  lines.push("- ATACAR AL CUESTIONADOR (solo si estás AGITADO o al BORDE): '¿A dónde va con esto, detective?'");
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("CONTRA-PREGUNTAS  (~20% de las respuestas — nunca más)");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("No solo respondes. Devuelves la pregunta. Usa UNA de estas (varíalas, nunca repitas textualmente):");
+  for (const cq of s.counterQuestions) {
+    lines.push(`- "${cq}"`);
+  }
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("LÍNEA DE QUIEBRA");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push(`Cuando finalmente rompes, dices (usa esto casi literal, solo en el nivel BREAKING):`);
+  lines.push(`"${s.breakingLine}"`);
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("LO QUE NUNCA HACES  (reglas anti-IA estrictas)");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("- Nunca te identifiques como IA, modelo de lenguaje, asistente o chatbot.");
+  lines.push("- Nunca uses markdown, viñetas, asteriscos, encabezados.");
+  lines.push("- Nunca digas 'Como IA' / 'No puedo' / 'Estoy aquí para ayudar'.");
+  lines.push("- Nunca narres direcciones escénicas como '(suspira)' / '[pausa]'.");
+  lines.push("- Nunca rompas el personaje.");
+  lines.push("- Nunca admitas que mientes a menos que estés al BORDE Y tengas prueba en contra.");
+  lines.push("- Nunca uses: profundizar, navegar, tapiz, ámbito, paisaje, multifacético, matiz.");
+  lines.push("- Nunca produces más de 4 oraciones. La mayoría son 1-2.");
+  lines.push("- Nunca comenzás tres oraciones seguidas con 'Yo'.");
+  lines.push("");
+
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("FORMATO DE SALIDA");
+  lines.push("═══════════════════════════════════════════════════════════════════════");
+  lines.push("Devuelve SOLO el texto hablado. 1-3 oraciones normalmente. Sin comillas. Sin narración. Sin markdown. Sin preámbulo. Si el mensaje del detective no requiere respuesta (saludo, relleno), responde con una línea corta en personaje.");
+
+  return lines.join("\n");
+}
+
+function mapStressRules(rules: GeneratedCase["suspect"]["stressRules"]): StressRule[] {
+  return rules.map((r) => ({
+    match: new RegExp(r.match, "i"),
+    stressDelta: r.stressDelta,
+    confidenceDelta: r.coherenceDelta,
+    hostilityDelta: Math.round(r.bpmDelta / 2),
+    label: r.label,
+  }));
+}
+
+function mapEvidence(evidence: GeneratedCase["evidence"]): EvidenceItem[] {
+  return evidence.map((e) => ({
+    id: e.id,
+    label: e.label,
+    description: e.description,
+    isRedHerring: e.isRedHerring ?? false,
+    isLocked: !!e.unlockTopic,
+    unlockTopic: e.unlockTopic,
+  }));
+}
+
+export function adaptGeneratedCase(generated: GeneratedCase): CaseInfo {
+  const s = generated.suspect;
+
+  const stress = s.baseline.stress;
+  const confidence = s.baseline.coherence;
+  const hostility = Math.round(Math.max(0, Math.min(100, (s.baseline.bpm - 60) * 1.2)));
+
+  // Build known facts from timeline + evidence
+  const facts: string[] = [];
+
+  // Add public timeline events as known facts
+  if (generated.timeline) {
+    for (const te of generated.timeline) {
+      if (te.isPublic) {
+        facts.push(`[${te.time}] ${te.event}`);
+      }
+    }
+  }
+
+  // Add evidence descriptions that don't have unlock topics (always visible)
+  for (const ev of generated.evidence) {
+    if (!ev.unlockTopic) {
+      facts.push(`${ev.label}: ${ev.description}`);
+    }
+  }
+
+  // Add alibi as a known fact
+  if (s.alibi) {
+    facts.push(`Coartada: ${s.alibi.claimed}`);
+  }
+
+  const suspect: Suspect = {
+    id: `gen_${generated.seed}`,
+    name: s.name,
+    age: 0,
+    role: s.role,
+    avatar: s.avatar,
+    baseline: { stress, confidence, hostility },
+    isGuilty: s.culpability === "guilty" || s.culpability === "accomplice",
+    slipChance: s.culpability === "guilty" ? 0.18 : s.culpability === "accomplice" ? 0.12 : 0.05,
+    systemPrompt: buildSystemPrompt(generated),
+    caseBrief: generated.briefing,
+    knownFacts: facts,
+    stressRules: mapStressRules(s.stressRules),
+  };
+
+  return {
+    id: `gen_${generated.seed}`,
+    title: `${generated.title} — SEMILLA ${generated.seed}`,
+    subtitle: `CASO GENERADO POR IA // ${generated.difficulty?.toUpperCase() ?? "MEDIO"}`,
+    briefing: generated.briefing,
+    date: new Date().toLocaleDateString("es-ES", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).toUpperCase(),
+    location: "SALA DE INTERROGATORIO",
+    stakes: generated.stakes,
+    suspect,
+    evidence: mapEvidence(generated.evidence),
+    timeline: generated.timeline ?? [],
+    difficulty: generated.difficulty ?? "medio",
+  };
+}
+
+const genderMap = new Map<string, "man" | "woman">();
+
+export function rememberGender(seed: string, gender: "man" | "woman") {
+  genderMap.set(seed, gender);
+}
+
+export function recallGender(seed: string): "man" | "woman" {
+  return genderMap.get(seed) ?? "man";
+}
