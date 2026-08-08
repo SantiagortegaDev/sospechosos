@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { PortalClientProvider } from "@/components/interrogation/portal-client-provider";
 
 export const metadata: Metadata = {
-  title: "Sospechosos · Expedientes de investigación",
+  title: "Los Sospechosos · Interrogación en vivo",
   description:
-    "Un juego de investigación e interrogatorio con casos, pistas y contradicciones verificables.",
+    "Dos detectives interrogan sospechosos de IA en tiempo real y buscan contradicciones.",
   keywords: [
     "realtime",
     "interrogation",
@@ -25,7 +26,7 @@ export default function RootLayout({
       <body
         className="antialiased bg-background text-foreground"
       >
-        {children}
+        <PortalClientProvider>{children}</PortalClientProvider>
         <Toaster />
       </body>
     </html>

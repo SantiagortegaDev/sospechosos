@@ -27,7 +27,7 @@ export function ClandestineSniffer({ activeSuspectId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { messages, status } = useChannel<ClandestineWhisper>({
+  const { messages, status, send } = useChannel<ClandestineWhisper>({
     channelId: channelIds.clandestine,
     history: 30,
   });
@@ -65,14 +65,12 @@ export function ClandestineSniffer({ activeSuspectId }: Props) {
         fromSuspectName: string;
         toSuspectId: string;
       };
-      // We don't have a server-publish path in dev; publish from the client.
-      // The whisper arrives tagged with the "from" suspect so the styling is correct.
-      // Note: in a production build you'd swap this to serverPublish() so the
-      // message's `sender` is the suspect, not the detective.
-      // For the hackathon, the content carries the from/to metadata.
-      // (We don't re-publish here to avoid duplicate-render — instead, both
-      // detectives can hit PING and they'll each see their own backend round-trip
-      // but only one whisper lands on the channel.)
+      // Persist the intercepted packet in Portal so every detective sees the
+      // same communication, including late joiners reading the backfill.
+      await send({
+        type: MessageType.Whisper,
+        content: data,
+      });
     } catch (err) {
       setError(`Whisper failed: ${(err as Error).message}`);
     } finally {

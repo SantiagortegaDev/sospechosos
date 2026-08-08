@@ -96,7 +96,20 @@ export function InterrogationFeed({
         body: JSON.stringify({
           suspectId: activeSuspectId,
           question: text,
-          history: [], // hackathon: stateless; multi-turn could be added by passing prior messages
+          // The shared Portal transcript is the source of truth for the active
+          // suspect. Each agent receives only its own prior exchange, never a
+          // different suspect's conversation.
+          history: messages
+            .filter((message) => {
+              const content = message.content as FeedMessage;
+              return content.suspectId === activeSuspectId &&
+                (message.type === MessageType.Question || message.type === MessageType.Answer);
+            })
+            .slice(-12)
+            .map((message) => ({
+              role: message.type === MessageType.Question ? "user" : "assistant",
+              content: (message.content as FeedMessage).text,
+            })),
           previousBiometrics,
         }),
       });
