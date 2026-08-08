@@ -53,7 +53,7 @@
 
   /* Base */
   --background: #0a0a0a;
-  --foreground: #b8b4a8;
+  --foreground: #e7e5df;
   --card: #121212;
   --card-foreground: #d4cfc1;
   --popover: #121212;
@@ -69,7 +69,7 @@
   --secondary: #1a1a1a;
   --secondary-foreground: #b8b4a8;
   --muted: #1a1a1a;
-  --muted-foreground: #5c5a52;
+  --muted-foreground: #a8a59d;
 
   /* Borders */
   --border: #2a2a2a;
@@ -97,7 +97,7 @@
 .dark {
   /* Same palette — Cyber-Noir is dark-only. */
   --background: #0a0a0a;
-  --foreground: #b8b4a8;
+  --foreground: #e7e5df;
   --card: #121212;
   --card-foreground: #d4cfc1;
   --popover: #121212;
@@ -107,7 +107,7 @@
   --secondary: #1a1a1a;
   --secondary-foreground: #b8b4a8;
   --muted: #1a1a1a;
-  --muted-foreground: #5c5a52;
+  --muted-foreground: #a8a59d;
   --accent: #1a1a1a;
   --accent-foreground: #ffb000;
   --destructive: #c83838;
@@ -137,22 +137,6 @@
     @apply bg-background text-foreground;
     font-family: var(--font-geist-mono), ui-monospace, "Menlo", monospace;
     background-color: #0a0a0a;
-  }
-  /* CRT scanlines on the whole viewport — subtle */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 50;
-    background-image: repeating-linear-gradient(
-      0deg,
-      rgba(255, 176, 0, 0.025) 0,
-      rgba(255, 176, 0, 0.025) 1px,
-      transparent 1px,
-      transparent 3px
-    );
-    mix-blend-mode: overlay;
   }
 }
 
