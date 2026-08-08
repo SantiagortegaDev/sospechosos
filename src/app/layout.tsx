@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Press_Start_2P, VT323, Silkscreen, Pixelify_Sans } from "next/font/google";
 import "./globals.css";
 import { PortalClientProvider } from "@/components/interrogation/portal-client-provider";
+import { AmbientMusic } from "@/components/interrogation/ambient-music";
 
 // Headings grandes — títulos principales (poco texto, mucho impacto)
 const pressStart2P = Press_Start_2P({
@@ -53,6 +54,7 @@ export default function RootLayout({
         className={`${pressStart2P.variable} ${vt323.variable} ${silkscreen.variable} ${pixelifySans.variable} antialiased bg-background text-foreground`}
         style={{ fontFamily: "var(--font-pixel-ui), var(--font-pixel-body), monospace" }}
       >
+        <AmbientMusic />
         <PortalClientProvider>{children}</PortalClientProvider>
       </body>
     </html>

@@ -139,6 +139,19 @@ export async function POST(req: Request) {
     stressLevel: actualStress.stress,
   });
 
+  // If the LLM call was rate-limited, return 429 so the frontend can show
+  // a clear message instead of silently using the fallback text.
+  if (reply.rateLimited) {
+    return NextResponse.json(
+      {
+        error: "rate_limited",
+        detail:
+          "Límite de tokens de Groq alcanzado (100k/día en tier gratuito). Espera ~20 minutos o usa una seed ya generada. Mientras tanto, el sospechoso guarda silencio.",
+      },
+      { status: 429 }
+    );
+  }
+
   const textLower = reply.text.toLowerCase();
   const slipSignals = [
     "lo hice", "yo hice", "lo cometí", "yo cometí",

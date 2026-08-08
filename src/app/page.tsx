@@ -626,7 +626,27 @@ export default function Home() {
       if (technique !== "neutral") { body.technique = technique; }
 
       const res = await fetch("/api/interrogate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!res.ok) { const errBody = await res.json().catch(() => ({})); throw new Error(errBody.error || `HTTP ${res.status}`); }
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        if (res.status === 429 || errBody.error === "rate_limited") {
+          // Rate limited — show a clear message in the chat so the user
+          // knows it's a quota issue, not a game bug. Still update stress
+          // (the question was asked, even if the suspect won't answer).
+          const rateLimitMsg: GameMessage = {
+            type: "suspect.answer",
+            senderType: "suspect",
+            senderId: "system",
+            senderName: "SISTEMA",
+            text: "[Límite de tokens de Groq alcanzado. El sospechoso guarda silencio. Espera ~20 min o usa una seed ya generada.]",
+            timestamp: Date.now(),
+          };
+          setChatMessages((prev) => [...prev.slice(-80), rateLimitMsg]);
+          setError("Límite de Groq alcanzado — espera unos minutos o usa una seed ya generada.");
+          SFX.soundError();
+          return;
+        }
+        throw new Error(errBody.error || errBody.detail || `HTTP ${res.status}`);
+      }
       const data = await res.json();
 
       const answerText = data.answer?.text ?? "...";
