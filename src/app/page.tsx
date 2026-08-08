@@ -1141,24 +1141,54 @@ export default function Home() {
         { key: "herramientas" as const, label: "HERRAMIENTAS" },
       ];
       return (
-        <div>
-          <div className="flex border-b-2 border-[var(--border)] flex-wrap">
+        <div className="flex flex-col h-full">
+          {/* Tabs — larger, more readable, two-row wrap */}
+          <div className="flex border-b-2 border-[var(--border)] flex-wrap shrink-0">
             {tabList.map((tab) => (
-              <button key={tab.key} onClick={() => setRightTab(tab.key)} className={cn("px-2 py-1.5 text-[8px] tracking-wider transition-all cursor-pointer", rightTab === tab.key ? "text-[var(--primary)] border-b-2 border-[var(--primary)] bg-[var(--primary)]/5" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]")} style={bodyFont}>{tab.label}</button>
+              <button
+                key={tab.key}
+                onClick={() => setRightTab(tab.key)}
+                className={cn(
+                  "px-2.5 py-2 text-[9px] tracking-wider transition-all cursor-pointer",
+                  rightTab === tab.key
+                    ? "text-[var(--primary)] border-b-2 border-[var(--primary)] bg-[var(--primary)]/8"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                )}
+                style={bodyFont}
+              >
+                {tab.label}
+              </button>
             ))}
           </div>
-          <div className="p-3 pixel-scroll max-h-80 overflow-y-auto" style={bodyFont}>
+          {/* Content — more padding, better hierarchy */}
+          <div className="p-4 pixel-scroll flex-1 overflow-y-auto" style={bodyFont}>
             {rightTab === "expediente" && (
-              <div className="space-y-3">
-                <div className="text-xs text-[var(--primary)] font-bold">RESUMEN DEL CASO</div>
-                <p className="text-xs text-[var(--foreground)] leading-relaxed">{currentCase.briefing}</p>
-                {currentCase.difficulty && <div className="mt-2"><DifficultyBadge difficulty={currentCase.difficulty} /></div>}
-                <div className="border-t border-[var(--border)] pt-2">
-                  <div className="text-xs text-[var(--foreground)] mb-1">{suspect.avatar} <strong>{suspect.name}</strong> — {suspect.role}</div>
+              <div className="space-y-4">
+                <div className="pixel-frame p-3">
+                  <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Resumen del caso</div>
+                  <p className="text-xs text-[var(--foreground)] leading-relaxed">{currentCase.briefing}</p>
+                  {currentCase.difficulty && <div className="mt-3"><DifficultyBadge difficulty={currentCase.difficulty} /></div>}
                 </div>
-                <div className="border-t border-[var(--border)] pt-2">
-                  <div className="text-xs text-[var(--foreground)] mb-2">HECHOS CONOCIDOS</div>
-                  {suspect.knownFacts.map((f, i) => <div key={i} className="text-xs text-[var(--foreground)] mb-1 flex gap-2"><span className="text-[var(--primary)]">•</span>{f}</div>)}
+                <div className="pixel-frame p-3">
+                  <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Sospechoso</div>
+                  <div className="text-xs text-[var(--foreground)] flex items-center gap-2">
+                    <span className="text-lg">{suspect.avatar}</span>
+                    <div>
+                      <div className="font-bold">{suspect.name}</div>
+                      <div className="text-[10px] text-[var(--muted-foreground)]">{suspect.role}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="pixel-frame p-3">
+                  <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Hechos conocidos</div>
+                  <div className="space-y-2">
+                    {suspect.knownFacts.map((f, i) => (
+                      <div key={i} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
+                        <span className="text-[var(--primary)] shrink-0">▸</span>
+                        <span>{f}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -1248,16 +1278,16 @@ export default function Home() {
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* LEFT: Suspect panel */}
-          <aside className="hidden md:flex flex-col w-64 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
+          <aside className="hidden md:flex flex-col w-72 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
             <div className="pixel-header"><span>SOSPECHOSO</span></div>
-            <div className="p-4 space-y-4 flex-1">
+            <div className="p-5 space-y-5 flex-1 overflow-y-auto pixel-scroll">
+              {/* Portrait + identity card */}
               <div className="text-center">
                 <div className={cn("flex justify-center mb-3", portraitShake && "pixel-portrait-shake")} style={{ filter: portraitTint }}>
                   <SuspectPortrait seed={currentCase?.id?.replace("gen_", "") ?? "default"} gender={recallGender(currentCase?.id?.replace("gen_", "") ?? "default")} avatar={suspect.avatar} size="lg" />
                 </div>
-                <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>{suspect.name}</div>
-                <div className="text-xs text-[var(--muted-foreground)] mt-1">{suspect.age ? `${suspect.age} años` : ""}</div>
-                <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">{suspect.role}</div>
+                <div className="text-base font-bold text-[var(--primary)] tracking-wider" style={headFont}>{suspect.name}</div>
+                <div className="text-xs text-[var(--muted-foreground)] mt-1">{suspect.age ? `${suspect.age} años · ` : ""}{suspect.role}</div>
                 {/* Suspect tells */}
                 {activeTells.length > 0 && (
                   <div className="flex justify-center gap-1 mt-2">
@@ -1265,16 +1295,26 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              <div className="space-y-2">
+
+              {/* Stress telemetry — thicker bars, more breathing room */}
+              <div className="pixel-frame p-3 space-y-3">
+                <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase">Telemetría</div>
                 <StressBar label="ESTRÉS" value={stress.stress} colorClass="stress" emoji="🔵" />
                 <StressBar label="NERVIOSISMO" value={nervousness} colorClass="nervousness" emoji="🟡" />
                 <StressBar label="CONFIANZA" value={stress.confidence} colorClass="confidence" emoji="🔷" />
                 <StressBar label="HOSTILIDAD" value={stress.hostility} colorClass="hostility" emoji="🔺" />
               </div>
-              <div className="border-t border-[var(--border)] pt-3">
-                <div className="text-xs text-[var(--foreground)] mb-2">HECHOS CONOCIDOS</div>
-                <div className="space-y-1 pixel-scroll max-h-28 overflow-y-auto">
-                  {suspect.knownFacts.map((f, i) => <div key={i} className="text-[10px] text-[var(--foreground)] flex gap-1.5"><span className="text-[var(--primary)] shrink-0">•</span>{f}</div>)}
+
+              {/* Known facts — card-based, more readable */}
+              <div className="pixel-frame p-3">
+                <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Hechos conocidos</div>
+                <div className="space-y-2 pixel-scroll max-h-40 overflow-y-auto">
+                  {suspect.knownFacts.map((f, i) => (
+                    <div key={i} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
+                      <span className="text-[var(--primary)] shrink-0">▸</span>
+                      <span>{f}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1340,7 +1380,7 @@ export default function Home() {
           </section>
 
           {/* RIGHT: Tabbed panel */}
-          <aside className="hidden md:flex flex-col w-72 border-l-2 border-[var(--border)] bg-[var(--card)] shrink-0"><RightTabs /></aside>
+          <aside className="hidden md:flex flex-col w-80 border-l-2 border-[var(--border)] bg-[var(--card)] shrink-0"><RightTabs /></aside>
 
           {/* MOBILE: Suspect panel */}
           <div className={cn("md:hidden flex-1 overflow-y-auto pixel-scroll p-4", mobileTab !== "sospechoso" && "hidden")}>

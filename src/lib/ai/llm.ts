@@ -34,6 +34,8 @@ export interface GenerateReplyOutput {
   text: string;
   stressLevel?: number;
   ms: number;
+  /** True if the call failed due to Groq rate limit (429). */
+  rateLimited?: boolean;
 }
 
 export async function generateSuspectReply(
@@ -82,11 +84,37 @@ export async function generateSuspectReply(
 
     return { text, ms: Date.now() - t0 };
   } catch (err) {
-    console.error("[llm] generateSuspectReply failed:", err);
-    return {
-      text: "Quiero hablar con mi abogado antes de continuar.",
-      ms: Date.now() - t0,
-    };
+    const errMsg = (err as Error).message ?? "";
+    console.error("[llm] generateSuspectReply failed:", errMsg);
+
+    // Detect rate limit (429) specifically — the user is out of Groq tokens
+    // for the day. Give them a useful in-character message that explains it
+    // instead of the same "abogado" line on every question.
+    if (errMsg.includes("429") || errMsg.includes("rate_limit")) {
+      return {
+        text: "[Límite de Groq alcanzado — espera unos minutos o usa una seed ya generada. El sospechoso permanece en silencio.]",
+        ms: Date.now() - t0,
+        rateLimited: true,
+      };
+    }
+
+    // For other errors (network, server, etc.) — return a VARIED in-character
+    // fallback, not always the same "abogado" line. The detective still gets
+    // something to react to, and it doesn't break immersion as badly.
+    const fallbacks = [
+      "No tengo nada más que decir.",
+      "Esa pregunta no la voy a responder.",
+      "Ya te lo dije. No insistas.",
+      "Silencio.",
+      "No recuerdo.",
+      "¿Por qué me preguntas eso otra vez?",
+      "No veo cómo eso sea relevante.",
+      "Paso.",
+      "No tengo por qué explicarte nada.",
+      "Ya respondí lo suficiente.",
+    ];
+    const text = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+    return { text, ms: Date.now() - t0 };
   }
 }
 
