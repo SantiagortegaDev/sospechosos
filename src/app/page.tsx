@@ -168,6 +168,9 @@ export default function Home() {
 
   /* Welcome flash */
   const [welcomeFlash, setWelcomeFlash] = useState(false);
+  /* Welcome mounted */
+  const [welcomeMounted, setWelcomeMounted] = useState(false);
+  useEffect(() => { if (phase === 'welcome') { requestAnimationFrame(() => setWelcomeMounted(true)); } }, [phase]);
 
   /* Case & intro */
   const [currentCase, setCurrentCase] = useState<CaseInfo | null>(null);
@@ -752,19 +755,42 @@ export default function Home() {
 
   const TimeSlider = ({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled?: boolean }) => {
     const marks = [3, 5, 8, 10, 12, 15];
+    const fillPercent = ((value - 3) / (15 - 3)) * 100;
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
           <label className="text-xs text-[var(--foreground)] tracking-wider font-bold">TIEMPO DE RONDA</label>
           <div className="pixel-frame px-3 py-1">
-            <span className="text-lg font-bold text-[var(--primary)]" style={headFont}>{value}</span>
+            <span className="text-lg font-bold text-[var(--primary)] transition-all duration-150" style={headFont}>{value}</span>
             <span className="text-[10px] text-[var(--muted-foreground)] ml-1">MIN</span>
           </div>
         </div>
-        <input type="range" min={3} max={15} step={1} value={value} onChange={(e) => onChange(Number(e.target.value))} disabled={disabled} className="pixel-slider w-full" />
-        <div className="flex justify-between px-1">
+        <input
+          type="range"
+          min={3}
+          max={15}
+          step={1}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          disabled={disabled}
+          className="pixel-slider w-full"
+          style={{ '--slider-fill': `${fillPercent}%` } as React.CSSProperties}
+        />
+        <div className="flex justify-between px-0.5">
           {marks.map((m) => (
-            <button key={m} type="button" onClick={() => !disabled && onChange(m)} disabled={disabled} className={cn("text-[9px] transition-colors cursor-pointer", value === m ? "text-[var(--primary)] font-bold" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]", disabled && "cursor-not-allowed opacity-30")}>{m}</button>
+            <button
+              key={m}
+              type="button"
+              onClick={() => !disabled && onChange(m)}
+              disabled={disabled}
+              className={cn(
+                "text-[9px] transition-all duration-150 cursor-pointer px-1",
+                value === m
+                  ? "text-[var(--primary)] font-bold scale-110"
+                  : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:scale-105",
+                disabled && "cursor-not-allowed opacity-30"
+              )}
+            >{m}</button>
           ))}
         </div>
       </div>
@@ -795,12 +821,12 @@ export default function Home() {
   if (phase === "welcome") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center cursor-pointer select-none relative"
-        onClick={() => { setWelcomeFlash(true); setTimeout(() => setPhase("create_or_join"), 800); }}>
+        onClick={() => { setWelcomeFlash(true); setTimeout(() => setPhase("create_or_join"), 600); }}>
         {welcomeFlash && <div className="fixed inset-0 bg-white z-50 pointer-events-none pixel-screen-flash" />}
-        <div className="text-center space-y-8 relative z-10">
+        <div className={cn("text-center space-y-8 relative z-10 transition-all duration-700", welcomeMounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6")}>
           <img src="/sospechosos-logo.png" alt="LOS SOSPECHOSOS" className="mx-auto w-full max-w-xl pixel-logo pixel-float" draggable={false} />
-          <div className="text-xs text-white/60 tracking-[0.3em]" style={bodyFont}>LA VERDAD ESTÁ EN TUS MANOS</div>
-          <div className="text-xl text-white pixel-text-glow-white mt-12 animate-bounce tracking-widest" style={bodyFont}>PRESIONA PARA EMPEZAR</div>
+          <div className="text-xs text-white/60 tracking-[0.3em] pixel-breathe" style={bodyFont}>LA VERDAD ESTA EN TUS MANOS</div>
+          <div className="text-xl text-white pixel-text-glow-white mt-12 pixel-breathe tracking-widest" style={{ ...bodyFont, animationDelay: '1.2s' }}>PRESIONA PARA EMPEZAR</div>
         </div>
       </main>
     );
@@ -811,14 +837,14 @@ export default function Home() {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
         {AchievementOverlay}
-        <div className="pixel-frame max-w-lg w-full p-6 space-y-6">
+        <div className="pixel-frame max-w-lg w-full p-6 space-y-6 pixel-scale-in">
           <div className="pixel-header"><span>SALA DE INTERROGACIÓN</span></div>
-          <div className="grid gap-4">
-            <button onClick={() => { setPhase("create"); setUsername(""); setError(""); }} className="pixel-frame p-4 text-left hover:bg-[var(--primary)]/10 transition-all cursor-pointer">
+          <div className="grid gap-4 pixel-stagger">
+            <button onClick={() => { setPhase("create"); setUsername(""); setError(""); }} className="pixel-frame pixel-frame-interactive p-4 text-left">
               <div className="text-[var(--primary)] font-bold tracking-widest text-sm" style={headFont}>CREAR SALA</div>
               <div className="text-[var(--muted-foreground)] text-xs mt-1" style={bodyFont}>Genera un código para que otro detective se una</div>
             </button>
-            <button onClick={() => { setPhase("join"); setUsername(""); setRoomCode(""); setError(""); }} className="pixel-frame p-4 text-left hover:bg-[var(--primary)]/10 transition-all cursor-pointer">
+            <button onClick={() => { setPhase("join"); setUsername(""); setRoomCode(""); setError(""); }} className="pixel-frame pixel-frame-interactive p-4 text-left">
               <div className="text-[var(--primary)] font-bold tracking-widest text-sm" style={headFont}>UNIRSE A SALA</div>
               <div className="text-[var(--muted-foreground)] text-xs mt-1" style={bodyFont}>Ingresa un código de sala existente</div>
             </button>
@@ -833,7 +859,7 @@ export default function Home() {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
         {AchievementOverlay}
-        <div className="pixel-frame max-w-md w-full p-6 space-y-5" style={bodyFont}>
+        <div className="pixel-frame max-w-md w-full p-6 space-y-5 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>CREAR SALA</span></div>
           {ErrorBanner}
           <div>
@@ -853,7 +879,7 @@ export default function Home() {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
         {AchievementOverlay}
-        <div className="pixel-frame max-w-md w-full p-6 space-y-4" style={bodyFont}>
+        <div className="pixel-frame max-w-md w-full p-6 space-y-4 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>INGRESAR A SALA</span></div>
           {ErrorBanner}
           <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">TU NOMBRE DE DETECTIVE</label><input value={username} onChange={(e) => setUsername(e.target.value)} maxLength={20} className="pixel-input w-full" placeholder="ej: Watson" /></div>
@@ -870,7 +896,7 @@ export default function Home() {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
         {AchievementOverlay}
-        <div className="pixel-frame max-w-md w-full p-6 space-y-4" style={bodyFont}>
+        <div className="pixel-frame max-w-md w-full p-6 space-y-4 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>INVITACIÓN A SALA</span></div>
           <div className="text-center text-xs text-[var(--foreground)] tracking-wider">CÓDIGO: <span className="text-[var(--primary)] text-sm">{roomCode.toUpperCase()}</span></div>
           {ErrorBanner}
@@ -886,7 +912,7 @@ export default function Home() {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
         {AchievementOverlay}
-        <div className="pixel-frame max-w-lg w-full p-6 space-y-6" style={bodyFont}>
+        <div className="pixel-frame max-w-lg w-full p-6 space-y-6 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>LOBBY // SALA: {roomCode.toUpperCase()}</span></div>
           <div className="text-center">
             <div className="text-xs text-[var(--foreground)] tracking-wider">CÓDIGO DE SALA</div>
@@ -921,7 +947,7 @@ export default function Home() {
   if (phase === "case_intro" && currentCase) {
     const c = currentCase; const s = c.suspect; const totalSteps = 6;
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 select-none">
+      <main className="min-h-screen flex flex-col items-center justify-center p-6 select-none pixel-fade-in">
         {AchievementOverlay}
         <div className="max-w-2xl w-full space-y-6 text-center">
           {caseIntroStep >= 0 && (
@@ -1162,9 +1188,9 @@ export default function Home() {
     };
 
     return (
-      <div className="min-h-screen flex flex-col" style={bodyFont}>
+      <div className="min-h-screen flex flex-col pixel-fade-in" style={bodyFont}>
         {AchievementOverlay}
-        <header className="border-b-2 border-[var(--border)] bg-[var(--card)] px-3 py-2 flex items-center justify-between shrink-0">
+        <header className="border-b border-[var(--border)] bg-[var(--card)] px-3 py-2 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-[var(--primary)] pixel-live-dot" />
             <span className="text-[9px] tracking-wider text-[var(--foreground)]">INTERROGACIÓN EN CURSO</span>
