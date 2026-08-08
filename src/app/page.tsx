@@ -29,6 +29,8 @@ import { TypewriterText } from "@/components/interrogation/typewriter-text";
 import { TypingIndicator } from "@/components/interrogation/typing-indicator";
 import { CaseGeneratorScreen } from "@/components/interrogation/case-generator-screen";
 import { SuspectPortrait } from "@/components/interrogation/suspect-portrait";
+import * as SFX from "@/lib/audio/sound-engine";
+import { speak, stopSpeaking } from "@/lib/audio/tts";
 import type {
   GamePhase,
   Session,
@@ -161,6 +163,7 @@ export default function Home() {
     Array<{ id: string; username: string; isHost: boolean }>
   >([]);
   const [error, setError] = useState("");
+  const [muted, setMutedState] = useState(SFX.isMuted());
   const [loading, setLoading] = useState(false);
 
   const [showTutorial, setShowTutorial] = useState(false);
@@ -367,7 +370,7 @@ export default function Home() {
       setUnlockedAchievements((prev) => [...prev, { ...ach, unlocked: true, unlockedAt: Date.now() }]);
       setAchievementPopup({ ...ach, unlocked: true, unlockedAt: Date.now() });
       setTimeout(() => setAchievementPopup(null), 4000);
-      // SFX: achievement_unlock
+      SFX.soundAchievement();
     },
     [unlockedAchievements]
   );
@@ -519,8 +522,8 @@ export default function Home() {
       saveSession(newSession); setSession(newSession); setRoomCode(data.code);
       setLobbyPlayers([{ id: playerId, username: username.trim(), isHost: true }]);
       setPhase("lobby");
-      // SFX: room_created
-    } catch { setError("Error al crear la sala"); } finally { setLoading(false); }
+      SFX.soundConnect();
+    } catch { setError("Error al crear la sala"); SFX.soundError(); } finally { setLoading(false); }
   }, [username, roundTime, playerId]);
 
   const handleJoinRoom = useCallback(async () => {
@@ -530,12 +533,12 @@ export default function Home() {
     try {
       const res = await fetch(`/api/rooms/${roomCode.trim().toLowerCase()}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "join", playerId: playerId, username: username.trim() }) });
       const data = await res.json();
-      if (data.error) { setError(data.error); return; }
+      if (data.error) { setError(data.error); SFX.soundError(); return; }
       const newSession: Session = { username: username.trim(), roomCode: data.code, isHost: false };
       saveSession(newSession); setSession(newSession); setRoomCode(data.code);
       setLobbyPlayers((prev) => [...prev, { id: playerId, username: username.trim(), isHost: false }]);
       setPhase("lobby");
-      // SFX: room_joined
+      SFX.soundConnect();
     } catch { setError("Error al unirse a la sala"); } finally { setLoading(false); }
   }, [username, roomCode, playerId]);
 
@@ -545,7 +548,7 @@ export default function Home() {
     if (!session?.isHost || !channels) return;
     try { await fetch(`/api/rooms/${session.roomCode}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start" }) }); } catch { /* ok */ }
     setPhase("generating_case");
-    // SFX: game_start
+    SFX.soundWhoosh();
   }, [session, channels]);
 
   const handleCaseReady = useCallback(async (generated: GeneratedCase) => {
@@ -558,7 +561,7 @@ export default function Home() {
     }
     try { await sendGame({ type: "game.start", content: { type: "game.start", case: caseInfo } }); } catch { /* ok */ }
     setPhase("case_intro"); setCaseIntroStep(0);
-    // SFX: case_ready
+    SFX.soundCaseReady();
   }, [sendGame]);
 
   const handleStartInterrogation = useCallback(() => {
@@ -571,7 +574,7 @@ export default function Home() {
     setQuestionsAsked(0); setFlaggedCount(0); setMaxStress(currentCase.suspect.baseline.stress);
     setSelectedEvidence(null); setTechnique("neutral");
     setPhase("playing");
-    // SFX: interrogation_start
+    SFX.soundWhoosh();
   }, [currentCase, roundTime]);
 
   const handleInterrogate = useCallback(async (e: React.FormEvent) => {
@@ -579,7 +582,10 @@ export default function Home() {
     const text = chatDraft.trim();
     if (!text || pending || !currentCase || !session) return;
     setChatDraft(""); setPending(true); setQuestionsAsked((prev) => prev + 1);
-    // SFX: send_question
+    // SFX: send question blip (ascending square wave)
+    SFX.soundSendQuestion();
+    // Stop any in-progress TTS from a previous answer.
+    stopSpeaking();
 
     const qMsg: GameMessage = { type: "detective.question", senderType: "detective", senderId: playerId, senderName: session.username, text, timestamp: Date.now() };
     setChatMessages((prev) => [...prev.slice(-80), qMsg]);
@@ -589,12 +595,14 @@ export default function Home() {
 
     // Check for evidence unlocks
     const qLower = text.toLowerCase();
+    let unlockedSomething = false;
     setEvidenceItems((prev) => prev.map(ev => {
       if (ev.isLocked && ev.unlockTopic) {
-        try { if (new RegExp(ev.unlockTopic, "i").test(qLower)) { return { ...ev, isLocked: false }; } } catch { /* invalid regex */ }
+        try { if (new RegExp(ev.unlockTopic, "i").test(qLower)) { unlockedSomething = true; return { ...ev, isLocked: false }; } } catch { /* invalid regex */ }
       }
       return ev;
     }));
+    if (unlockedSomething) SFX.soundEvidenceUnlock();
 
     try {
       const stressRulesRaw = currentCase.suspect.stressRules.map(r => ({
@@ -621,25 +629,47 @@ export default function Home() {
       if (!res.ok) { const errBody = await res.json().catch(() => ({})); throw new Error(errBody.error || `HTTP ${res.status}`); }
       const data = await res.json();
 
-      const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: data.answer?.text ?? "...", timestamp: Date.now() };
+      const answerText = data.answer?.text ?? "...";
+      const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: answerText, timestamp: Date.now() };
       setChatMessages((prev) => [...prev.slice(-80), aMsg]);
       try { await sendGame({ type: "suspect.answer", content: aMsg }); } catch { /* ok */ }
 
-      setConversationHistory((prev) => [...prev.slice(-40), newTurn, { role: "suspect", text: data.answer?.text ?? "", timestamp: Date.now() }]);
+      setConversationHistory((prev) => [...prev.slice(-40), newTurn, { role: "suspect", text: answerText, timestamp: Date.now() }]);
+
+      // SFX: stress rise — compare previous stress to new stress.
+      const prevStressLevel = stress?.stress ?? 0;
+      const newStressLevel = data.stress?.stress ?? prevStressLevel;
+      if (newStressLevel > prevStressLevel + 5) {
+        // Delay slightly so it lands as the answer appears.
+        setTimeout(() => SFX.soundStressRise(newStressLevel), 200);
+      }
 
       if (data.stress) {
         setStress(data.stress);
         if (data.stress.stress > maxStress) setMaxStress(data.stress.stress);
       }
-      if (data.answer?.flagged) { setFlaggedCount((prev) => prev + 1); unlockAchievement("gotcha"); }
+
+      // SFX: lie detected (glitch) + TTS for the suspect's answer.
+      if (data.answer?.flagged) {
+        setFlaggedCount((prev) => prev + 1);
+        unlockAchievement("gotcha");
+        setTimeout(() => SFX.soundLieDetected(), 150);
+      }
+      // TTS: speak the suspect's answer aloud (robotic pixel voice).
+      // Small delay so it lands after the typewriter starts.
+      setTimeout(() => speak(answerText), 300);
+
       if (questionsAsked === 0) unlockAchievement("first_blood");
       if (data.stress?.stress >= 90) unlockAchievement("pressure_cooker");
       if (questionsAsked + 1 >= 20) unlockAchievement("cross_examine");
 
       setSelectedEvidence(null);
       setTechnique("neutral");
-      // SFX: suspect_answer
-    } catch (err) { console.error("[interrogate] failed:", err); setError("Error en la interrogación"); } finally { setPending(false); }
+    } catch (err) {
+      console.error("[interrogate] failed:", err);
+      setError("Error en la interrogación");
+      SFX.soundError();
+    } finally { setPending(false); }
   }, [chatDraft, pending, currentCase, session, playerId, conversationHistory, stress, sendGame, maxStress, questionsAsked, unlockAchievement, selectedEvidence, technique]);
 
   const handleSendDetective = useCallback(async (e: React.FormEvent) => {
@@ -667,7 +697,7 @@ export default function Home() {
     const vote: DetectiveVote = { playerId, playerName: session.username, vote: voteChoice, reason: voteReason.trim(), votedAt: Date.now() };
     setVotes((prev) => [...prev, vote]); setHasVoted(true);
     try { await sendGame({ type: "vote.cast", content: { ...vote, type: "vote.cast" } }); } catch { /* ok */ }
-    // SFX: vote_cast
+    SFX.soundVerdict();
   }, [voteChoice, voteReason, session, playerId, sendGame]);
 
   const playAgain = useCallback(() => {
@@ -1147,7 +1177,7 @@ export default function Home() {
             {tabList.map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => setRightTab(tab.key)}
+                onClick={() => { setRightTab(tab.key); SFX.soundTab(); }}
                 className={cn(
                   "px-2.5 py-2 text-[9px] tracking-wider transition-all cursor-pointer",
                   rightTab === tab.key
@@ -1272,6 +1302,13 @@ export default function Home() {
             <PhaseIndicator current="playing" />
             <span className="pixel-badge text-[8px]">PREGUNTAS: {questionsAsked}</span>
             <span className={cn("text-xs font-bold", timeRemaining <= 60 ? "text-[var(--destructive)] pixel-timer-warning" : "text-[var(--primary)]")} style={headFont}>⏱ {formatTime(timeRemaining)}</span>
+            <button
+              onClick={() => { const m = SFX.toggleMuted(); setMutedState(m); if (!m) SFX.soundClick(); }}
+              className="pixel-btn-secondary text-[8px] py-1 px-2"
+              title={muted ? "Activar sonido" : "Silenciar"}
+            >
+              {muted ? "🔇" : "🔊"}
+            </button>
             <button onClick={enterDeliberation} className="pixel-btn-secondary text-[8px] py-1 px-2">DELIBERAR</button>
           </div>
         </header>
@@ -1405,7 +1442,7 @@ export default function Home() {
 
         <div className="md:hidden flex border-t-2 border-[var(--border)] bg-[var(--card)]">
           {[{ key: "chat" as const, label: "💬 CHAT" }, { key: "sospechoso" as const, label: `${suspect.avatar} SOSPECHOSO` }, { key: "panel" as const, label: "📋 PANEL" }].map((tab) => (
-            <button key={tab.key} onClick={() => setMobileTab(tab.key)} className={cn("flex-1 py-2 text-[8px] tracking-wider transition-colors cursor-pointer", mobileTab === tab.key ? "text-[var(--primary)] bg-[var(--primary)]/5 border-b-2 border-[var(--primary)]" : "text-[var(--muted-foreground)]")} style={bodyFont}>{tab.label}</button>
+            <button key={tab.key} onClick={() => { setMobileTab(tab.key); SFX.soundTab(); }} className={cn("flex-1 py-2 text-[8px] tracking-wider transition-colors cursor-pointer", mobileTab === tab.key ? "text-[var(--primary)] bg-[var(--primary)]/5 border-b-2 border-[var(--primary)]" : "text-[var(--muted-foreground)]")} style={bodyFont}>{tab.label}</button>
           ))}
         </div>
       </div>
