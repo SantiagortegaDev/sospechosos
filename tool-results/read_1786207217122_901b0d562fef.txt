@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→
+     3→import { useState, useEffect, useRef, useCallback } from "react";
+     4→import {
+     5→  channelIdsFor,
+     6→  type GameMessage,
+     7→  type DetectiveMessage,
+     8→  type StressUpdate,
+     9→  type AIEventPayload,
+    10→  type VotePayload,
+    11→} from "@/lib/portal/channels";
+    12→import {
+    13→  SUSPECTS,
+    14→  findSuspect,
+    15→  type Suspect,
+    16→  type CaseInfo,
+    17→} from "@/lib/ai/suspects";
+    18→import { adaptGeneratedCase, rememberGender, recallGender } from "@/lib/ai/adapt-generated";
+    19→import type { GeneratedCase } from "@/lib/ai/generated-case";
+    20→import {
+    21→  ACHIEVEMENTS,
+    22→  ACHIEVEMENT_MESSAGES,
+    23→  type Achievement,
+    24→} from "@/lib/ai/achievements";
+    25→import { determineEnding, type EndingResult } from "@/lib/ai/endings";
+    26→import { useChannel } from "@portalsdk/react";
+    27→import { cn } from "@/lib/utils";
+    28→import { TypewriterText } from "@/components/interrogation/typewriter-text";
+    29→import { TypingIndicator } from "@/components/interrogation/typing-indicator";
+    30→import { CaseGeneratorScreen } from "@/components/interrogation/case-generator-screen";
+    31→import { SuspectPortrait } from "@/components/interrogation/suspect-portrait";
+    32→import type {
+    33→  GamePhase,
+    34→  Session,
+    35→  StressState,
+    36→  DetectiveVote,
+    37→  ConversationTurn,
+    38→  DetectiveNote,
+    39→  TimelineEntry,
+    40→} from "@/lib/types/game";
+    41→
+    42→/* ═══════════════════════════════════════════════════════════════════════
+    43→ * CONSTANTS
+    44→ * ═══════════════════════════════════════════════════════════════════════ */
+    45→
+    46→const STORAGE_KEY = "sospechosos:session";
+    47→const TUTORIAL_KEY = "sospechosos:tutorial_seen";
+    48→const AI_TICK_MS = 25_000;
+    49→const DELIBERATION_SECONDS = 120;
+    50→const QUICK_QUESTIONS = [
+    51→  { label: "Coartada", text: "¿Dónde estabas el día del crimen?" },
+    52→  { label: "Relación", text: "¿Conocías a la víctima?" },
+    53→  { label: "Motivo", text: "¿Tienes algún motivo?" },
+    54→  { label: "Versión", text: "¿Puedes describir tu versión de los hechos?" },
+    55→  { label: "Testigos", text: "¿Alguien puede confirmar tu historia?" },
+    56→  { label: "Directa", text: "¿Tienes algo que esconder?" },
+    57→];
+    58→
+    59→/* ─── Session helpers ─── */
+    60→
+    61→function loadSession(): Session | null {
+    62→  if (typeof window === "undefined") return null;
+    63→  try {
+    64→    const raw = sessionStorage.getItem(STORAGE_KEY);
+    65→    if (!raw) return null;
+    66→    return JSON.parse(raw);
+    67→  } catch {
+    68→    return null;
+    69→  }
+    70→}
+    71→function saveSession(s: Session) {
+    72→  if (typeof window !== "undefined")
+    73→    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    74→}
+    75→function clearSession() {
+    76→  if (typeof window !== "undefined") sessionStorage.removeItem(STORAGE_KEY);
+    77→}
+    78→function getRoomCodeFromURL(): string | null {
+    79→  if (typeof window === "undefined") return null;
+    80→  const params = new URLSearchParams(window.location.search);
+    81→  return params.get("room") || null;
+    82→}
+    83→function formatTime(s: number): string {
+    84→  const m = Math.floor(s / 60);
+    85→  const sec = s % 60;
+    86→  return `${m}:${sec.toString().padStart(2, "0")}`;
+    87→}
+    88→
+    89→/* ═══════════════════════════════════════════════════════════════════════
+    90→ * MAIN COMPONENT
+    91→ * ═══════════════════════════════════════════════════════════════════════ */
+    92→
+    93→export default function Home() {
+    94→  /* ─── Player ID (persistent per session) ─── */
+    95→  const [playerId] = useState<string>(
+    96→    () => crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)
+    97→  );
+    98→
+    99→  /* ─── Core phase ─── */
+   100→  const [phase, setPhase] = useState<GamePhase>("welcome");
+   101→
+   102→  /* ─── Session & lobby ─── */
+   103→  const [session, setSession] = useState<Session | null>(null);
+   104→  const [username, setUsername] = useState("");
+   105→  const [roomCode, setRoomCode] = useState("");
+   106→  const [roundTime, setRoundTime] = useState<5 | 8 | 12>(5);
+   107→  const [lobbyPlayers, setLobbyPlayers] = useState<
+   108→    Array<{ id: string; username: string; isHost: boolean }>
+   109→  >([]);
+   110→  const [error, setError] = useState("");
+   111→  const [loading, setLoading] = useState(false);
+   112→
+   113→  /* ─── Tutorial ─── */
+   114→  const [showTutorial, setShowTutorial] = useState(false);
+   115→  const [tutorialChecked, setTutorialChecked] = useState(false);
+   116→
+   117→  /* ─── Case & intro ─── */
+   118→  const [currentCase, setCurrentCase] = useState<CaseInfo | null>(null);
+   119→  const [caseIntroStep, setCaseIntroStep] = useState(0);
+   120→
+   121→  /* ─── Timer ─── */
+   122→  const [timeRemaining, setTimeRemaining] = useState(0);
+   123→  const [totalTime, setTotalTime] = useState(0);
+   124→
+   125→  /* ─── Playing: chat & stress ─── */
+   126→  const [chatMessages, setChatMessages] = useState<GameMessage[]>([]);
+   127→  const [detectiveMessages, setDetectiveMessages] = useState<DetectiveMessage[]>(
+   128→    []
+   129→  );
+   130→  const [stress, setStress] = useState<StressState>({
+   131→    stress: 30,
+   132→    confidence: 70,
+   133→    hostility: 20,
+   134→  });
+   135→  const [conversationHistory, setConversationHistory] = useState<
+   136→    ConversationTurn[]
+   137→  >([]);
+   138→  const [notes, setNotes] = useState("");
+   139→  const [timelineEntries, setTimelineEntries] = useState<TimelineEntry[]>([]);
+   140→  const [chatDraft, setChatDraft] = useState("");
+   141→  const [detectiveDraft, setDetectiveDraft] = useState("");
+   142→  const [pending, setPending] = useState(false);
+   143→  const [questionsAsked, setQuestionsAsked] = useState(0);
+   144→  const [flaggedCount, setFlaggedCount] = useState(0);
+   145→  const [maxStress, setMaxStress] = useState(0);
+   146→
+   147→  /* ─── Right panel tab (desktop) & mobile tab ─── */
+   148→  const [rightTab, setRightTab] = useState<
+   149→    "expediente" | "notas" | "timeline" | "detectives" | "herramientas"
+   150→  >("expediente");
+   151→  const [mobileTab, setMobileTab] = useState<
+   152→    "chat" | "sospechoso" | "panel"
+   153→  >("chat");
+   154→
+   155→  /* ─── Deliberation ─── */
+   156→  const [delibTimeRemaining, setDelibTimeRemaining] = useState(
+   157→    DELIBERATION_SECONDS
+   158→  );
+   159→
+   160→  /* ─── Vote ─── */
+   161→  const [votes, setVotes] = useState<DetectiveVote[]>([]);
+   162→  const [hasVoted, setHasVoted] = useState(false);
+   163→  const [voteChoice, setVoteChoice] = useState<"guilty" | "innocent" | "">("");
+   164→  const [voteReason, setVoteReason] = useState("");
+   165→  const [allVotesIn, setAllVotesIn] = useState(false);
+   166→
+   167→  /* ─── Verdict & results ─── */
+   168→  const [verdict, setVerdict] = useState<{
+   169→    decision: "freed" | "imprisoned";
+   170→    judgeReasoning: string;
+   171→    judgesComment: string;
+   172→    suspectIsGuilty: boolean;
+   173→    majorityCorrect: boolean;
+   174→    guiltyVotes: number;
+   175→    innocentVotes: number;
+   176→  } | null>(null);
+   177→  const [ending, setEnding] = useState<EndingResult | null>(null);
+   178→  const [shakeKey, setShakeKey] = useState(0);
+   179→
+   180→  /* ─── Achievements ─── */
+   181→  const [unlockedAchievements, setUnlockedAchievements] = useState<
+   182→    Achievement[]
+   183→  >([]);
+   184→  const [achievementPopup, setAchievementPopup] = useState<Achievement | null>(
+   185→    null
+   186→  );
+   187→
+   188→  /* ─── Refs ─── */
+   189→  const chatEndRef = useRef<HTMLDivElement>(null);
+   190→  const chatInputRef = useRef<HTMLInputElement>(null);
+   191→  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   192→  const aiTickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+   193→  const delibTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   194→  const phaseRef = useRef<GamePhase>(phase);
+   195→  const seenMsgIds = useRef<Set<string>>(new Set());
+   196→
+   197→  useEffect(() => {
+   198→    phaseRef.current = phase;
+   199→  }, [phase]);
+   200→
+   201→  /* ─── Computed channels ─── */
+   202→  const channels = session ? channelIdsFor(session.roomCode) : null;
+   203→
+   204→  /* ═══════════════════════════════════════════════════════════════════════
+   205→   * CHANNEL SUBSCRIPTIONS
+   206→   * ═══════════════════════════════════════════════════════════════════════ */
+   207→
+   208→  const { send: sendGame, presence } = useChannel({
+   209→    channelId: channels?.game ?? "__empty__",
+   210→    history: phase === "playing" ? 30 : "none",
+   211→    enabled:
+   212→      (phase === "playing" ||
+   213→        phase === "deliberation" ||
+   214→        phase === "vote") &&
+   215→      !!channels,
+   216→    onMessage: (msg: any) => {
+   217→      try {
+   218→        const type = msg?.type ?? msg?.content?.type;
+   219→        const payload = msg?.content ?? msg;
+   220→
+   221→        if (type === "game.chat" || type === "detective.question" || type === "suspect.answer" || type === "suspect.autonomous" || type === "system.event") {
+   222→          const gameMsg = payload as GameMessage;
+   223→          const msgId = `${gameMsg.senderId}-${gameMsg.timestamp}`;
+   224→          if (seenMsgIds.current.has(msgId)) return;
+   225→          seenMsgIds.current.add(msgId);
+   226→          setChatMessages((prev) => [...prev.slice(-80), gameMsg]);
+   227→        }
+   228→
+   229→        if (type === "stress.update") {
+   230→          const su = payload as StressUpdate;
+   231→          setStress({ stress: su.stress, confidence: su.confidence, hostility: su.hostility, trigger: su.trigger });
+   232→        }
+   233→
+   234→        if (type === "ai.event") {
+   235→          const evt = payload as AIEventPayload;
+   236→          const aiMsg: GameMessage = {
+   237→            type: "suspect.autonomous",
+   238→            senderType: "suspect",
+   239→            senderId: evt.suspectId,
+   240→            senderName: evt.suspectName,
+   241→            text: evt.text,
+   242→            timestamp: evt.timestamp,
+   243→          };
+   244→          const msgId = `ai-${evt.timestamp}-${evt.suspectId}`;
+   245→          if (!seenMsgIds.current.has(msgId)) {
+   246→            seenMsgIds.current.add(msgId);
+   247→            setChatMessages((prev) => [...prev.slice(-80), aiMsg]);
+   248→          }
+   249→        }
+   250→
+   251→        if (type === "game.start") {
+   252→          const caseData = payload.case as CaseInfo;
+   253→          if (caseData) setCurrentCase(caseData);
+   254→        }
+   255→
+   256→        if (type === "game.phase") {
+   257→          const newPhase = payload.phase as GamePhase;
+   258→          if (["deliberation", "vote", "verdict", "results"].includes(newPhase)) {
+   259→            setPhase(newPhase);
+   260→          }
+   261→        }
+   262→
+   263→        if (type === "vote.cast") {
+   264→          const vp = payload as VotePayload;
+   265→          setVotes((prev) => {
+   266→            if (prev.some((v) => v.playerId === vp.playerId)) return prev;
+   267→            return [
+   268→              ...prev,
+   269→              {
+   270→                playerId: vp.playerId,
+   271→                playerName: vp.playerName,
+   272→                vote: vp.vote,
+   273→                reason: vp.reason,
+   274→                votedAt: vp.votedAt,
+   275→              },
+   276→            ];
+   277→          });
+   278→        }
+   279→      } catch {
+   280→        // ignore malformed messages
+   281→      }
+   282→    },
+   283→  });
+   284→
+   285→  const { send: sendDetective } = useChannel({
+   286→    channelId: channels?.detectives ?? "__empty__",
+   287→    history: phase === "playing" || phase === "deliberation" ? 30 : "none",
+   288→    enabled:
+   289→      (phase === "playing" || phase === "deliberation") && !!channels,
+   290→    onMessage: (msg: any) => {
+   291→      try {
+   292→        const payload = msg?.content ?? msg;
+   293→        if (payload?.type === "detective.note" || payload?.detectiveId) {
+   294→          const dm: DetectiveMessage = {
+   295→            type: "detective.note",
+   296→            detectiveId: payload.detectiveId,
+   297→            detectiveName: payload.detectiveName,
+   298→            text: payload.text,
+   299→            timestamp: payload.timestamp ?? Date.now(),
+   300→          };
+   301→          setDetectiveMessages((prev) => [...prev.slice(-50), dm]);
+   302→        }
+   303→      } catch {
+   304→        // ignore
+   305→      }
+   306→    },
+   307→  });
+   308→
+   309→  /* ═══════════════════════════════════════════════════════════════════════
+   310→   * CALLBACKS (defined before effects that reference them)
+   311→   * ═══════════════════════════════════════════════════════════════════════ */
+   312→
+   313→  /* ─── Enter deliberation ─── */
+   314→  const enterDeliberation = useCallback(() => {
+   315→    if (timerRef.current) clearInterval(timerRef.current);
+   316→    setDelibTimeRemaining(DELIBERATION_SECONDS);
+   317→    setPhase("deliberation");
+   318→  }, []);
+   319→
+   320→  /* ─── Achievement unlock ─── */
+   321→  const unlockAchievement = useCallback(
+   322→    (id: string) => {
+   323→      if (unlockedAchievements.some((a) => a.id === id)) return;
+   324→      const ach = ACHIEVEMENTS.find((a) => a.id === id);
+   325→      if (!ach) return;
+   326→      setUnlockedAchievements((prev) => [...prev, { ...ach, unlocked: true, unlockedAt: Date.now() }]);
+   327→      setAchievementPopup({ ...ach, unlocked: true, unlockedAt: Date.now() });
+   328→      setTimeout(() => setAchievementPopup(null), 4000);
+   329→    },
+   330→    [unlockedAchievements]
+   331→  );
+   332→
+   333→  /* ─── Call judge ─── */
+   334→  const callJudge = useCallback(async () => {
+   335→    if (!currentCase || votes.length === 0) return;
+   336→    setPhase("verdict");
+   337→    setLoading(true);
+   338→
+   339→    try {
+   340→      const suspect = currentCase.suspect;
+   341→      const convSummary = conversationHistory
+   342→        .slice(-30)
+   343→        .map(
+   344→          (t) =>
+   345→            `[${t.role === "detective" ? t.detectiveName || "Detective" : suspect.name}]: ${t.text}`
+   346→        )
+   347→        .join("\n");
+   348→      const stressSummary = `Estrés: ${stress.stress}% | Confianza: ${stress.confidence}% | Hostilidad: ${stress.hostility}% | Máximo estrés: ${maxStress}%`;
+   349→
+   350→      const res = await fetch("/api/judge", {
+   351→        method: "POST",
+   352→        headers: { "Content-Type": "application/json" },
+   353→        body: JSON.stringify({
+   354→          suspectId: suspect.id,
+   355→          votes: votes.map((v) => ({
+   356→            playerName: v.playerName,
+   357→            vote: v.vote,
+   358→            reason: v.reason,
+   359→          })),
+   360→          conversationSummary: convSummary,
+   361→          stressHistory: stressSummary,
+   362→        }),
+   363→      });
+   364→      const data = await res.json();
+   365→      setVerdict(data);
+   366→
+   367→      // Trigger shake
+   368→      setShakeKey((prev) => prev + 1);
+   369→
+   370→      // Determine ending
+   371→      const isUnanimous =
+   372→        votes.every((v) => v.vote === "guilty") ||
+   373→        votes.every((v) => v.vote === "innocent");
+   374→      const end = determineEnding(
+   375→        data.majorityCorrect,
+   376→        data.suspectIsGuilty,
+   377→        lobbyPlayers.length || 1,
+   378→        questionsAsked,
+   379→        isUnanimous,
+   380→        1 - timeRemaining / totalTime
+   381→      );
+   382→      setEnding(end);
+   383→
+   384→      // Achievements
+   385→      if (data.majorityCorrect && data.suspectIsGuilty)
+   386→        unlockAchievement("criminal_caught");
+   387→      if (data.majorityCorrect && !data.suspectIsGuilty)
+   388→        unlockAchievement("correct_acquittal");
+   389→      if (!data.majorityCorrect) unlockAchievement("wrong_verdict");
+   390→      if (isUnanimous && data.majorityCorrect) unlockAchievement("unanimous");
+   391→      if (lobbyPlayers.length === 1 && data.majorityCorrect)
+   392→        unlockAchievement("lobo_solitario");
+   393→    } catch (err) {
+   394→      console.error("[judge] failed:", err);
+   395→      setError("Error del juez. Veredicto pendiente.");
+   396→    } finally {
+   397→      setLoading(false);
+   398→    }
+   399→  }, [
+   400→    currentCase,
+   401→    votes,
+   402→    conversationHistory,
+   403→    stress,
+   404→    maxStress,
+   405→    lobbyPlayers.length,
+   406→    questionsAsked,
+   407→    timeRemaining,
+   408→    totalTime,
+   409→    unlockAchievement,
+   410→  ]);
+   411→
+   412→  /* ═══════════════════════════════════════════════════════════════════════
+   413→   * EFFECTS
+   414→   * ═══════════════════════════════════════════════════════════════════════ */
+   415→
+   416→  /* ─── Auto-scroll chat ─── */
+   417→  useEffect(() => {
+   418→    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+   419→  }, [chatMessages.length, detectiveMessages.length]);
+   420→
+   421→  /* ─── Tutorial check on mount ─── */
+   422→  useEffect(() => {
+   423→    if (typeof window === "undefined" || tutorialChecked) return;
+   424→    setTutorialChecked(true);
+   425→    const urlCode = getRoomCodeFromURL();
+   426→    if (urlCode) {
+   427→      setRoomCode(urlCode);
+   428→      setPhase("join_by_link");
+   429→      return;
+   430→    }
+   431→    const saved = loadSession();
+   432→    if (saved) {
+   433→      setSession(saved);
+   434→      setRoomCode(saved.roomCode);
+   435→      setUsername(saved.username);
+   436→      setPhase("lobby");
+   437→      return;
+   438→    }
+   439→    const seen = localStorage.getItem(TUTORIAL_KEY);
+   440→    if (!seen) {
+   441→      setShowTutorial(true);
+   442→    }
+   443→  }, [tutorialChecked]);
+   444→
+   445→  /* ─── Playing timer ─── */
+   446→  useEffect(() => {
+   447→    if (phase !== "playing" || timeRemaining <= 0) return;
+   448→    timerRef.current = setInterval(() => {
+   449→      setTimeRemaining((prev) => {
+   450→        if (prev <= 1) {
+   451→          if (timerRef.current) clearInterval(timerRef.current);
+   452→          enterDeliberation();
+   453→          return 0;
+   454→        }
+   455→        return prev - 1;
+   456→      });
+   457→    }, 1000);
+   458→    return () => {
+   459→      if (timerRef.current) clearInterval(timerRef.current);
+   460→    };
+   461→   
+   462→  }, [phase, enterDeliberation]);
+   463→
+   464→  /* ─── Deliberation timer ─── */
+   465→  useEffect(() => {
+   466→    if (phase !== "deliberation" || delibTimeRemaining <= 0) return;
+   467→    delibTimerRef.current = setInterval(() => {
+   468→      setDelibTimeRemaining((prev) => {
+   469→        if (prev <= 1) {
+   470→          if (delibTimerRef.current) clearInterval(delibTimerRef.current);
+   471→          setPhase("vote");
+   472→          return 0;
+   473→        }
+   474→        return prev - 1;
+   475→      });
+   476→    }, 1000);
+   477→    return () => {
+   478→      if (delibTimerRef.current) clearInterval(delibTimerRef.current);
+   479→    };
+   480→   
+   481→  }, [phase]);
+   482→
+   483→  /* ─── AI tick ─── */
+   484→  useEffect(() => {
+   485→    if (phase !== "playing" || !currentCase) return;
+   486→
+   487→    const runTick = async () => {
+   488→      if (phaseRef.current !== "playing") return;
+   489→      try {
+   490→        const historySlice = conversationHistory.slice(-20);
+   491→        const context = historySlice
+   492→          .map((t) => `${t.role === "detective" ? "Detective" : "Sospechoso"}: ${t.text}`)
+   493→          .join("\n") || "La sala está en silencio. Nadie ha hecho preguntas todavía.";
+   494→
+   495→        const res = await fetch("/api/ai-tick", {
+   496→          method: "POST",
+   497→          headers: { "Content-Type": "application/json" },
+   498→          body: JSON.stringify({
+   499→            suspectId: currentCase.suspect.id,
+   500→            recentContext: context,
+   501→            stressLevel: stress.stress,
+   502→          }),
+   503→        });
+   504→        if (!res.ok) return;
+   505→        const data = await res.json();
+   506→        if (data.skipped || !data.event) return;
+   507→
+   508→        const evt = data.event;
+   509→        if (channels && sendGame) {
+   510→          try {
+   511→            await sendGame({
+   512→              type: "ai.event",
+   513→              content: {
+   514→                type: "ai.event",
+   515→                suspectId: evt.suspectId,
+   516→                suspectName: evt.suspectName,
+   517→                kind: evt.kind,
+   518→                text: evt.text,
+   519→                timestamp: Date.now(),
+   520→              },
+   521→            });
+   522→          } catch {
+   523→            // channel send may fail
+   524→          }
+   525→        }
+   526→      } catch (err) {
+   527→        console.error("[ai-tick] failed:", err);
+   528→      }
+   529→    };
+   530→
+   531→    // First tick after 5 seconds
+   532→    const firstTimeout = setTimeout(runTick, 5000);
+   533→
+   534→    // Subsequent ticks every AI_TICK_MS
+   535→    const tickInterval = setInterval(() => {
+   536→      if (phaseRef.current === "playing") runTick();
+   537→    }, AI_TICK_MS);
+   538→
+   539→    return () => {
+   540→      clearTimeout(firstTimeout);
+   541→      clearInterval(tickInterval);
+   542→    };
+   543→   
+   544→  }, [phase, currentCase, channels, sendGame]);
+   545→
+   546→  /* ─── Check all votes in ─── */
+   547→  useEffect(() => {
+   548→    if (votes.length >= 2 && !allVotesIn) {
+   549→      setAllVotesIn(true);
+   550→      setTimeout(() => callJudge(), 1500);
+   551→    }
+   552→  }, [votes.length, allVotesIn, callJudge]);
+   553→
+   554→  /* ═══════════════════════════════════════════════════════════════════════
+   555→   * ACHIEVEMENT SYSTEM (callback moved above — see CALLBACKS section)
+   556→   * ═══════════════════════════════════════════════════════════════════════ */
+   557→
+   558→  /* ═══════════════════════════════════════════════════════════════════════
+   559→   * HANDLERS
+   560→   * ═══════════════════════════════════════════════════════════════════════ */
+   561→
+   562→  /* ─── Tutorial close ─── */
+   563→  const closeTutorial = () => {
+   564→    localStorage.setItem(TUTORIAL_KEY, "1");
+   565→    setShowTutorial(false);
+   566→  };
+   567→
+   568→  /* ─── Create room ─── */
+   569→  const handleCreateRoom = useCallback(async () => {
+   570→    if (!username.trim()) {
+   571→      setError("Ingresa un nombre de detective");
+   572→      return;
+   573→    }
+   574→    setError("");
+   575→    setLoading(true);
+   576→    try {
+   577→      const res = await fetch("/api/rooms", {
+   578→        method: "POST",
+   579→        headers: { "Content-Type": "application/json" },
+   580→        body: JSON.stringify({
+   581→          hostId: playerId,
+   582→          hostUsername: username.trim(),
+   583→          settings: { roundTimeMinutes: roundTime, maxDetectives: 2 },
+   584→        }),
+   585→      });
+   586→      const data = await res.json();
+   587→      if (data.error) {
+   588→        setError(data.error);
+   589→        return;
+   590→      }
+   591→      const newSession: Session = {
+   592→        username: username.trim(),
+   593→        roomCode: data.code,
+   594→        isHost: true,
+   595→      };
+   596→      saveSession(newSession);
+   597→      setSession(newSession);
+   598→      setRoomCode(data.code);
+   599→      setLobbyPlayers([
+   600→        { id: playerId, username: username.trim(), isHost: true },
+   601→      ]);
+   602→      setPhase("lobby");
+   603→    } catch {
+   604→      setError("Error al crear la sala");
+   605→    } finally {
+   606→      setLoading(false);
+   607→    }
+   608→  }, [username, roundTime, playerId]);
+   609→
+   610→  /* ─── Join room ─── */
+   611→  const handleJoinRoom = useCallback(async () => {
+   612→    if (!username.trim()) {
+   613→      setError("Ingresa un nombre de detective");
+   614→      return;
+   615→    }
+   616→    if (!roomCode.trim()) {
+   617→      setError("Ingresa el código de la sala");
+   618→      return;
+   619→    }
+   620→    setError("");
+   621→    setLoading(true);
+   622→    try {
+   623→      const res = await fetch(`/api/rooms/${roomCode.trim().toLowerCase()}`, {
+   624→        method: "POST",
+   625→        headers: { "Content-Type": "application/json" },
+   626→        body: JSON.stringify({
+   627→          action: "join",
+   628→          playerId: playerId,
+   629→          username: username.trim(),
+   630→        }),
+   631→      });
+   632→      const data = await res.json();
+   633→      if (data.error) {
+   634→        setError(data.error);
+   635→        return;
+   636→      }
+   637→      const newSession: Session = {
+   638→        username: username.trim(),
+   639→        roomCode: data.code,
+   640→        isHost: false,
+   641→      };
+   642→      saveSession(newSession);
+   643→      setSession(newSession);
+   644→      setRoomCode(data.code);
+   645→      setLobbyPlayers((prev) => [
+   646→        ...prev,
+   647→        { id: playerId, username: username.trim(), isHost: false },
+   648→      ]);
+   649→      setPhase("lobby");
+   650→    } catch {
+   651→      setError("Error al unirse a la sala");
+   652→    } finally {
+   653→      setLoading(false);
+   654→    }
+   655→  }, [username, roomCode, playerId]);
+   656→
+   657→  /* ─── Join by link ─── */
+   658→  const handleJoinByLink = useCallback(async () => {
+   659→    await handleJoinRoom();
+   660→  }, [handleJoinRoom]);
+   661→
+   662→  /* ─── Start game (host) ─── */
+   663→  const handleStartGame = useCallback(async () => {
+   664→    if (!session?.isHost || !channels) return;
+   665→    try {
+   666→      await fetch(`/api/rooms/${session.roomCode}`, {
+   667→        method: "POST",
+   668→        headers: { "Content-Type": "application/json" },
+   669→        body: JSON.stringify({ action: "start" }),
+   670→      });
+   671→    } catch {
+   672→      // ok
+   673→    }
+   674→    // Go to the case generator screen — the host picks/generates a seed
+   675→    // there, and on case-ready we transition to case_intro.
+   676→    setPhase("generating_case");
+   677→  }, [session, channels]);
+   678→
+   679→  /* ─── Case generated (host) — adapt and transition to case intro ─── */
+   680→  const handleCaseReady = useCallback(
+   681→    async (generated: GeneratedCase) => {
+   682→      // Remember the gender so SuspectPortrait can pick the right image.
+   683→      rememberGender(generated.seed, generated.suspect.gender);
+   684→      const caseInfo = adaptGeneratedCase(generated);
+   685→      setCurrentCase(caseInfo);
+   686→
+   687→      // Notify the other detective(s) via the realtime channel.
+   688→      try {
+   689→        await sendGame({
+   690→          type: "game.start",
+   691→          content: { type: "game.start", case: caseInfo },
+   692→        });
+   693→      } catch {
+   694→        // ok
+   695→      }
+   696→
+   697→      setPhase("case_intro");
+   698→      setCaseIntroStep(0);
+   699→    },
+   700→    [sendGame]
+   701→  );
+   702→
+   703→  /* ─── Start interrogation from intro ─── */
+   704→  const handleStartInterrogation = useCallback(() => {
+   705→    if (!currentCase) return;
+   706→    setStress({
+   707→      stress: currentCase.suspect.baseline.stress,
+   708→      confidence: currentCase.suspect.baseline.confidence,
+   709→      hostility: currentCase.suspect.baseline.hostility,
+   710→    });
+   711→    setTimeRemaining(roundTime * 60);
+   712→    setTotalTime(roundTime * 60);
+   713→    setChatMessages([]);
+   714→    setDetectiveMessages([]);
+   715→    setConversationHistory([]);
+   716→    setQuestionsAsked(0);
+   717→    setFlaggedCount(0);
+   718→    setMaxStress(currentCase.suspect.baseline.stress);
+   719→    setPhase("playing");
+   720→  }, [currentCase, roundTime]);
+   721→
+   722→  /* ─── Interrogate (detective sends question) ─── */
+   723→  const handleInterrogate = useCallback(
+   724→    async (e: React.FormEvent) => {
+   725→      e.preventDefault();
+   726→      const text = chatDraft.trim();
+   727→      if (!text || pending || !currentCase || !session) return;
+   728→
+   729→      setChatDraft("");
+   730→      setPending(true);
+   731→      setQuestionsAsked((prev) => prev + 1);
+   732→
+   733→      // Add detective question locally
+   734→      const qMsg: GameMessage = {
+   735→        type: "detective.question",
+   736→        senderType: "detective",
+   737→        senderId: playerId,
+   738→        senderName: session.username,
+   739→        text,
+   740→        timestamp: Date.now(),
+   741→      };
+   742→      setChatMessages((prev) => [...prev.slice(-80), qMsg]);
+   743→
+   744→      // Track conversation
+   745→      const newTurn: ConversationTurn = {
+   746→        role: "detective",
+   747→        text,
+   748→        detectiveName: session.username,
+   749→        timestamp: Date.now(),
+   750→      };
+   751→
+   752→      // Send to channel
+   753→      try {
+   754→        await sendGame({ type: "detective.question", content: qMsg });
+   755→      } catch {
+   756→        // ok
+   757→      }
+   758→
+   759→      try {
+   760→        const res = await fetch("/api/interrogate", {
+   761→          method: "POST",
+   762→          headers: { "Content-Type": "application/json" },
+   763→          body: JSON.stringify({
+   764→            suspectId: currentCase.suspect.id,
+   765→            question: text,
+   766→            history: conversationHistory.slice(-20),
+   767→            previousStress: stress,
+   768→          }),
+   769→        });
+   770→        if (!res.ok) {
+   771→          const errBody = await res.json().catch(() => ({}));
+   772→          throw new Error(errBody.error || `HTTP ${res.status}`);
+   773→        }
+   774→        const data = await res.json();
+   775→
+   776→        // Add suspect answer
+   777→        const aMsg: GameMessage = {
+   778→          type: "suspect.answer",
+   779→          senderType: "suspect",
+   780→          senderId: currentCase.suspect.id,
+   781→          senderName: currentCase.suspect.name,
+   782→          text: data.answer?.text ?? "...",
+   783→          timestamp: Date.now(),
+   784→        };
+   785→        setChatMessages((prev) => [...prev.slice(-80), aMsg]);
+   786→
+   787→        // Send answer to channel
+   788→        try {
+   789→          await sendGame({ type: "suspect.answer", content: aMsg });
+   790→        } catch {
+   791→          // ok
+   792→        }
+   793→
+   794→        // Update conversation history
+   795→        setConversationHistory((prev) => [
+   796→          ...prev.slice(-40),
+   797→          newTurn,
+   798→          {
+   799→            role: "suspect",
+   800→            text: data.answer?.text ?? "",
+   801→            timestamp: Date.now(),
+   802→          },
+   803→        ]);
+   804→
+   805→        // Update stress
+   806→        if (data.stress) {
+   807→          setStress(data.stress);
+   808→          if (data.stress.stress > maxStress) {
+   809→            setMaxStress(data.stress.stress);
+   810→          }
+   811→        }
+   812→
+   813→        // Check flagged
+   814→        if (data.answer?.flagged) {
+   815→          setFlaggedCount((prev) => prev + 1);
+   816→          unlockAchievement("gotcha");
+   817→        }
+   818→
+   819→        // Achievement checks
+   820→        if (questionsAsked === 0) unlockAchievement("first_blood");
+   821→        if (data.stress?.stress >= 90) unlockAchievement("pressure_cooker");
+   822→        if (questionsAsked + 1 >= 20) unlockAchievement("cross_examine");
+   823→      } catch (err) {
+   824→        console.error("[interrogate] failed:", err);
+   825→        setError("Error en la interrogación");
+   826→      } finally {
+   827→        setPending(false);
+   828→      }
+   829→    },
+   830→    [
+   831→      chatDraft,
+   832→      pending,
+   833→      currentCase,
+   834→      session,
+   835→      playerId,
+   836→      conversationHistory,
+   837→      stress,
+   838→      sendGame,
+   839→      maxStress,
+   840→      questionsAsked,
+   841→      unlockAchievement,
+   842→    ]
+   843→  );
+   844→
+   845→  /* ─── Send detective message (private) ─── */
+   846→  const handleSendDetective = useCallback(
+   847→    async (e: React.FormEvent) => {
+   848→      e.preventDefault();
+   849→      const text = detectiveDraft.trim();
+   850→      if (!text || !session) return;
+   851→      setDetectiveDraft("");
+   852→      const dm: DetectiveMessage = {
+   853→        type: "detective.note",
+   854→        detectiveId: playerId,
+   855→        detectiveName: session.username,
+   856→        text,
+   857→        timestamp: Date.now(),
+   858→      };
+   859→      setDetectiveMessages((prev) => [...prev.slice(-50), dm]);
+   860→      try {
+   861→        await sendDetective({ type: "detective.note", content: dm });
+   862→      } catch {
+   863→        // ok
+   864→      }
+   865→    },
+   866→    [detectiveDraft, session, playerId, sendDetective]
+   867→  );
+   868→
+   869→  /* ─── Quick question insert ─── */
+   870→  const insertQuickQuestion = (text: string) => {
+   871→    setChatDraft(text);
+   872→    chatInputRef.current?.focus();
+   873→  };
+   874→
+   875→  /* ─── Add timeline entry ─── */
+   876→  const addTimelineEntry = () => {
+   877→    // simple add via prompt-like inline input
+   878→    const label = prompt("Etiqueta del evento:");
+   879→    if (!label) return;
+   880→    const desc = prompt("Descripción:");
+   881→    if (!desc) return;
+   882→    const entry: TimelineEntry = {
+   883→      id: `tl_${Date.now()}`,
+   884→      label,
+   885→      description: desc,
+   886→      addedBy: playerId,
+   887→      addedByName: username || "Detective",
+   888→      createdAt: Date.now(),
+   889→    };
+   890→    setTimelineEntries((prev) => [...prev, entry]);
+   891→  };
+   892→
+   893→  /* ─── enterDeliberation moved above — see CALLBACKS section ─── */
+   894→
+   895→  /* ─── Skip to vote ─── */
+   896→  const skipToVote = useCallback(() => {
+   897→    if (delibTimerRef.current) clearInterval(delibTimerRef.current);
+   898→    setPhase("vote");
+   899→  }, []);
+   900→
+   901→  /* ─── Submit vote ─── */
+   902→  const handleSubmitVote = useCallback(async () => {
+   903→    if (!voteChoice || !session) return;
+   904→    const vote: DetectiveVote = {
+   905→      playerId,
+   906→      playerName: session.username,
+   907→      vote: voteChoice,
+   908→      reason: voteReason.trim(),
+   909→      votedAt: Date.now(),
+   910→    };
+   911→    setVotes((prev) => [...prev, vote]);
+   912→    setHasVoted(true);
+   913→
+   914→    // Send to channel
+   915→    try {
+   916→      await sendGame({
+   917→        type: "vote.cast",
+   918→        content: { ...vote, type: "vote.cast" },
+   919→      });
+   920→    } catch {
+   921→      // ok
+   922→    }
+   923→  }, [voteChoice, voteReason, session, playerId, sendGame]);
+   924→
+   925→  /* ─── callJudge moved above — see CALLBACKS section ─── */
+   926→
+   927→  /* ─── Play again ─── */
+   928→  const playAgain = useCallback(() => {
+   929→    clearSession();
+   930→    setSession(null);
+   931→    setRoomCode("");
+   932→    setUsername("");
+   933→    setCurrentCase(null);
+   934→    setChatMessages([]);
+   935→    setDetectiveMessages([]);
+   936→    setVotes([]);
+   937→    setHasVoted(false);
+   938→    setVerdict(null);
+   939→    setEnding(null);
+   940→    setUnlockedAchievements([]);
+   941→    setTimeRemaining(0);
+   942→    setTotalTime(0);
+   943→    setPhase("welcome");
+   944→  }, []);
+   945→
+   946→  /* ─── Leave room ─── */
+   947→  const leaveRoom = useCallback(() => {
+   948→    if (timerRef.current) clearInterval(timerRef.current);
+   949→    if (delibTimerRef.current) clearInterval(delibTimerRef.current);
+   950→    clearSession();
+   951→    setSession(null);
+   952→    setRoomCode("");
+   953→    setUsername("");
+   954→    setPhase("welcome");
+   955→  }, []);
+   956→
+   957→  /* ─── Copy invite link ─── */
+   958→  const copyInviteLink = useCallback(() => {
+   959→    const link = `${window.location.origin}?room=${roomCode}`;
+   960→    navigator.clipboard.writeText(link).catch(() => {});
+   961→  }, [roomCode]);
+   962→
+   963→  /* ═══════════════════════════════════════════════════════════════════════
+   964→ * SHARED UI HELPERS
+   965→ * ═══════════════════════════════════════════════════════════════════════ */
+   966→
+   967→  const bodyFont = { fontFamily: "var(--font-pixel-body), monospace" as const };
+   968→  const headFont = { fontFamily: "var(--font-pixel), monospace" as const };
+   969→
+   970→  const ErrorBanner = error ? (
+   971→    <div
+   972→      className="border-2 border-[var(--destructive)] bg-[var(--destructive)]/10 p-2 text-xs text-[var(--destructive)] mb-4"
+   973→      style={bodyFont}
+   974→    >
+   975→      {error}
+   976→    </div>
+   977→  ) : null;
+   978→
+   979→  const BackBtn = ({
+   980→    target,
+   981→    label = "◂ VOLVER",
+   982→  }: {
+   983→    target: GamePhase;
+   984→    label?: string;
+   985→  }) => (
+   986→    <button
+   987→      onClick={() => {
+   988→        setPhase(target);
+   989→        setError("");
+   990→      }}
+   991→      className="w-full py-2 text-xs tracking-widest text-[var(--muted-foreground)] border-2 border-[var(--border)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
+   992→      style={bodyFont}
+   993→    >
+   994→      {label}
+   995→    </button>
+   996→  );
+   997→
+   998→  const AchievementOverlay = achievementPopup ? (
+   999→    <div className="fixed top-4 right-4 z-50 achievement-popup">
+  1000→      <div className="pixel-frame p-4 max-w-xs" style={bodyFont}>
+  1001→        <div className="flex items-center gap-3">
+  1002→          <span className="text-2xl">{achievementPopup.icon}</span>
+  1003→          <div>
+  1004→            <div className="text-xs font-bold text-[var(--primary)] tracking-wider">
+  1005→              LOGRO DESBLOQUEADO
+  1006→            </div>
+  1007→            <div className="text-sm text-[var(--foreground)] font-bold mt-1">
+  1008→              {achievementPopup.name}
+  1009→            </div>
+  1010→            <div className="text-xs text-[var(--muted-foreground)] mt-0.5">
+  1011→              {achievementPopup.description}
+  1012→            </div>
+  1013→          </div>
+  1014→        </div>
+  1015→      </div>
+  1016→    </div>
+  1017→  ) : null;
+  1018→
+  1019→  /* ═══════════════════════════════════════════════════════════════════════
+  1020→   * RENDER: TUTORIAL
+  1021→   * ═══════════════════════════════════════════════════════════════════════ */
+  1022→
+  1023→  if (showTutorial) {
+  1024→    return (
+  1025→      <div className="min-h-screen flex items-center justify-center  p-4">
+  1026→        {AchievementOverlay}
+  1027→        <div className="pixel-frame max-w-md w-full p-6 space-y-5">
+  1028→          <div className="pixel-header">
+  1029→            <span>COMO JUGAR</span>
+  1030→          </div>
+  1031→          <img
+  1032→            src="/sospechosos-logo.png"
+  1033→            alt="LOS SOSPECHOSOS"
+  1034→            className="mx-auto w-full max-w-[280px] pixel-logo"
+  1035→            draggable={false}
+  1036→          />
+  1037→          <div className="space-y-3" style={bodyFont}>
+  1038→            {[
+  1039→              "Como Detective, tu misión es interrogar al sospechoso y descubrir si es CULPABLE o INOCENTE.",
+  1040→              "Haz preguntas inteligentes. Observa sus indicadores de estrés. Busca contradicciones.",
+  1041→              "Al final, vota con tu compañero: CULPABLE (va preso) o INOCENTE (queda libre).",
+  1042→              "El juez decidirá el destino final.",
+  1043→            ].map((step, i) => (
+  1044→              <div
+  1045→                key={i}
+  1046→                className="flex gap-3 text-xs text-[var(--foreground)]"
+  1047→              >
+  1048→                <span className="text-[var(--primary)] font-bold shrink-0">
+  1049→                  {i + 1}.
+  1050→                </span>
+  1051→                <span>{step}</span>
+  1052→              </div>
+  1053→            ))}
+  1054→          </div>
+  1055→          <button
+  1056→            onClick={closeTutorial}
+  1057→            className="pixel-btn w-full py-3 text-xs tracking-widest font-bold"
+  1058→            style={headFont}
+  1059→          >
+  1060→            ENTENDIDO ✓
+  1061→          </button>
+  1062→        </div>
+  1063→      </div>
+  1064→    );
+  1065→  }
+  1066→
+  1067→  /* ═══════════════════════════════════════════════════════════════════════
+  1068→   * RENDER: PHASE: welcome
+  1069→   * ═══════════════════════════════════════════════════════════════════════ */
+  1070→
+  1071→  if (phase === "welcome") {
+  1072→    return (
+  1073→      <main
+  1074→        className="min-h-screen flex flex-col items-center justify-center cursor-pointer select-none relative"
+  1075→        onClick={() => setPhase("create_or_join")}
+  1076→      >
+  1077→        {AchievementOverlay}
+  1078→        <div className="text-center space-y-8 relative z-10">
+  1079→          <div
+  1080→            className="text-[10px] tracking-[0.5em] text-[var(--muted-foreground)]"
+  1081→            style={bodyFont}
+  1082→          >
+  1083→            SALA DE INTERROGACIÓN //
+  1084→          </div>
+  1085→          {/* Pixel art logo — replaces text title */}
+  1086→          <img
+  1087→            src="/sospechosos-logo.png"
+  1088→            alt="LOS SOSPECHOSOS"
+  1089→            className="mx-auto w-full max-w-xl pixel-logo pixel-float"
+  1090→            draggable={false}
+  1091→          />
+  1092→          <div
+  1093→            className="text-[10px] tracking-[0.3em] text-[var(--muted-foreground)]"
+  1094→            style={bodyFont}
+  1095→          >
+  1096→            LA VERDAD ESTÁ EN TUS MANOS
+  1097→          </div>
+  1098→          <div
+  1099→            className="text-sm text-[var(--muted-foreground)] mt-12 animate-bounce tracking-widest"
+  1100→            style={bodyFont}
+  1101→          >
+  1102→            PRESIONA PARA EMPEZAR
+  1103→          </div>
+  1104→        </div>
+  1105→        <div
+  1106→          className="absolute bottom-4 text-[9px] text-[var(--muted-foreground)]/40 tracking-widest z-10"
+  1107→          style={bodyFont}
+  1108→        >
+  1109→          v0.1 // PORTAL REALTIME · GROQ
+  1110→        </div>
+  1111→      </main>
+  1112→    );
+  1113→  }
+  1114→
+  1115→  /* ═══════════════════════════════════════════════════════════════════════
+  1116→   * RENDER: PHASE: create_or_join
+  1117→   * ═══════════════════════════════════════════════════════════════════════ */
+  1118→
+  1119→  if (phase === "create_or_join") {
+  1120→    return (
+  1121→      <main className="min-h-screen flex flex-col items-center justify-center  p-4">
+  1122→        {AchievementOverlay}
+  1123→        <div className="pixel-frame max-w-lg w-full p-6 space-y-6">
+  1124→          <div className="pixel-header">
+  1125→            <span>SALA DE INTERROGACIÓN</span>
+  1126→          </div>
+  1127→          <div className="grid gap-4">
+  1128→            <button
+  1129→              onClick={() => {
+  1130→                setPhase("create");
+  1131→                setUsername("");
+  1132→                setError("");
+  1133→              }}
+  1134→              className="pixel-frame p-4 text-left hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
+  1135→            >
+  1136→              <div
+  1137→                className="text-[var(--primary)] font-bold tracking-widest text-sm"
+  1138→                style={headFont}
+  1139→              >
+  1140→                CREAR SALA
+  1141→              </div>
+  1142→              <div
+  1143→                className="text-[var(--muted-foreground)] text-xs mt-1"
+  1144→                style={bodyFont}
+  1145→              >
+  1146→                Genera un código para que otro detective se una
+  1147→              </div>
+  1148→            </button>
+  1149→            <button
+  1150→              onClick={() => {
+  1151→                setPhase("join");
+  1152→                setUsername("");
+  1153→                setRoomCode("");
+  1154→                setError("");
+  1155→              }}
+  1156→              className="pixel-frame p-4 text-left hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
+  1157→            >
+  1158→              <div
+  1159→                className="text-[var(--primary)] font-bold tracking-widest text-sm"
+  1160→                style={headFont}
+  1161→              >
+  1162→                UNIRSE A SALA
+  1163→              </div>
+  1164→              <div
+  1165→                className="text-[var(--muted-foreground)] text-xs mt-1"
+  1166→                style={bodyFont}
+  1167→              >
+  1168→                Ingresa un código de sala existente
+  1169→              </div>
+  1170→            </button>
+  1171→          </div>
+  1172→        </div>
+  1173→      </main>
+  1174→    );
+  1175→  }
+  1176→
+  1177→  /* ═══════════════════════════════════════════════════════════════════════
+  1178→   * RENDER: PHASE: create
+  1179→   * ═══════════════════════════════════════════════════════════════════════ */
+  1180→
+  1181→  if (phase === "create") {
+  1182→    return (
+  1183→      <main className="min-h-screen flex flex-col items-center justify-center  p-4">
+  1184→        {AchievementOverlay}
+  1185→        <div className="pixel-frame max-w-md w-full p-6 space-y-4" style={bodyFont}>
+  1186→          <div className="pixel-header">
+  1187→            <span>CREAR SALA</span>
+  1188→          </div>
+  1189→          {ErrorBanner}
+  1190→          <div>
+  1191→            <label className="text-[10px] tracking-widest text-[var(--muted-foreground)] block mb-1">
+  1192→              TU NOMBRE DE DETECTIVE
+  1193→            </label>
+  1194→            <input
+  1195→              value={username}
+  1196→              onChange={(e) => setUsername(e.target.value)}
+  1197→              maxLength={20}
+  1198→              className="pixel-input w-full"
+  1199→              placeholder="ej: Holmes"
+  1200→              autoFocus
+  1201→            />
+  1202→          </div>
+  1203→          <div>
+  1204→            <label className="text-[10px] tracking-widest text-[var(--muted-foreground)] block mb-2">
+  1205→              TIEMPO DE RONDA
+  1206→            </label>
+  1207→            <div className="grid grid-cols-3 gap-2">
+  1208→              {([5, 8, 12] as const).map((t) => (
+  1209→                <button
+  1210→                  key={t}
+  1211→                  onClick={() => setRoundTime(t)}
+  1212→                  className={cn(
+  1213→                    "pixel-frame p-3 text-center transition-colors cursor-pointer",
+  1214→                    roundTime === t
+  1215→                      ? "border-[var(--primary)] bg-[var(--primary)]/20"
+  1216→                      : "hover:bg-[var(--accent)]"
+  1217→                  )}
+  1218→                >
+  1219→                  <div className="text-lg font-bold">{t}</div>
+  1220→                  <div className="text-[9px] text-[var(--muted-foreground)]">MIN</div>
+  1221→                </button>
+  1222→              ))}
+  1223→            </div>
+  1224→          </div>
+  1225→          <button
+  1226→            onClick={handleCreateRoom}
+  1227→            disabled={loading || !username.trim()}
+  1228→            className="pixel-btn w-full py-3"
+  1229→            style={headFont}
+  1230→          >
+  1231→            {loading ? "CREANDO SALA..." : "CREAR SALA"}
+  1232→          </button>
+  1233→          <BackBtn target="create_or_join" />
+  1234→        </div>
+  1235→      </main>
+  1236→    );
+  1237→  }
+  1238→
+  1239→  /* ═══════════════════════════════════════════════════════════════════════
+  1240→   * RENDER: PHASE: join
+  1241→   * ═══════════════════════════════════════════════════════════════════════ */
+  1242→
+  1243→  if (phase === "join") {
+  1244→    return (
+  1245→      <main className="min-h-screen flex flex-col items-center justify-center  p-4">
+  1246→        {AchievementOverlay}
+  1247→        <div className="pixel-frame max-w-md w-full p-6 space-y-4" style={bodyFont}>
+  1248→          <div className="pixel-header">
+  1249→            <span>INGRESAR A SALA</span>
+  1250→          </div>
+  1251→          {ErrorBanner}
+  1252→          <div>
+  1253→            <label className="text-[10px] tracking-widest text-[var(--muted-foreground)] block mb-1">
+  1254→              TU NOMBRE DE DETECTIVE
+  1255→            </label>
+  1256→            <input
+  1257→              value={username}
+  1258→              onChange={(e) => setUsername(e.target.value)}
+  1259→              maxLength={20}
+  1260→              className="pixel-input w-full"
+  1261→              placeholder="ej: Watson"
+  1262→            />
+  1263→          </div>
+  1264→          <div>
+  1265→            <label className="text-[10px] tracking-widest text-[var(--muted-foreground)] block mb-1">
+  1266→              CÓDIGO DE SALA
+  1267→            </label>
+  1268→            <input
+  1269→              value={roomCode}
+  1270→              onChange={(e) =>
+  1271→                setRoomCode(
+  1272→                  e.target.value.toLowerCase().replace(/[^a-z0-9]/g, "")
+  1273→                )
+  1274→              }
+  1275→              maxLength={8}
+  1276→              className="pixel-input w-full uppercase tracking-widest"
+  1277→              placeholder="abc123"
+  1278→              autoFocus
+  1279→            />
+  1280→          </div>
+  1281→          <button
+  1282→            onClick={handleJoinRoom}
+  1283→            disabled={loading || !username.trim() || !roomCode.trim()}
+  1284→            className="pixel-btn w-full py-3"
+  1285→            style={headFont}
+  1286→          >
+  1287→            {loading ? "VERIFICANDO..." : "UNIRSE"}
+  1288→          </button>
+  1289→          <BackBtn target="create_or_join" />
+  1290→        </div>
+  1291→      </main>
+  1292→    );
+  1293→  }
+  1294→
+  1295→  /* ═══════════════════════════════════════════════════════════════════════
+  1296→   * RENDER: PHASE: join_by_link
+  1297→   * ═══════════════════════════════════════════════════════════════════════ */
+  1298→
+  1299→  if (phase === "join_by_link") {
+  1300→    return (
+  1301→      <main className="min-h-screen flex flex-col items-center justify-center  p-4">
+  1302→        {AchievementOverlay}
+  1303→        <div className="pixel-frame max-w-md w-full p-6 space-y-4" style={bodyFont}>
+  1304→          <div className="pixel-header">
+  1305→            <span>INVITACIÓN A SALA</span>
+  1306→          </div>
+  1307→          <div className="text-center text-[10px] tracking-widest text-[var(--muted-foreground)]">
+  1308→            CÓDIGO: <span className="text-[var(--primary)] text-sm">{roomCode.toUpperCase()}</span>
+  1309→          </div>
+  1310→          {ErrorBanner}
+  1311→          <div>
+  1312→            <label className="text-[10px] tracking-widest text-[var(--muted-foreground)] block mb-1">
+  1313→              TU NOMBRE DE DETECTIVE
+  1314→            </label>
+  1315→            <input
+  1316→              value={username}
+  1317→              onChange={(e) => setUsername(e.target.value)}
+  1318→              maxLength={20}
+  1319→              className="pixel-input w-full"
+  1320→              placeholder="ej: Watson"
+  1321→              autoFocus
+  1322→            />
+  1323→          </div>
+  1324→          <button
+  1325→            onClick={handleJoinByLink}
+  1326→            disabled={loading || !username.trim()}
+  1327→            className="pixel-btn w-full py-3"
+  1328→            style={headFont}
+  1329→          >
+  1330→            {loading ? "UNIÉNDOSE..." : "ENTRAR A LA SALA"}
+  1331→          </button>
+  1332→        </div>
+  1333→      </main>
+  1334→    );
+  1335→  }
+  1336→
+  1337→  /* ═══════════════════════════════════════════════════════════════════════
+  1338→   * RENDER: PHASE: lobby
+  1339→   * ═══════════════════════════════════════════════════════════════════════ */
+  1340→
+  1341→  if (phase === "lobby") {
+  1342→    return (
+  1343→      <main className="min-h-screen flex flex-col items-center justify-center  p-4">
+  1344→        {AchievementOverlay}
+  1345→        <div className="pixel-frame max-w-lg w-full p-6 space-y-6" style={bodyFont}>
+  1346→          <div className="pixel-header">
+  1347→            <span>LOBBY // SALA: {roomCode.toUpperCase()}</span>
+  1348→          </div>
+  1349→
+  1350→          {/* Room code */}
+  1351→          <div className="text-center">
+  1352→            <div className="text-[10px] tracking-widest text-[var(--muted-foreground)]">
+  1353→              CÓDIGO DE SALA
+  1354→            </div>
+  1355→            <div
+  1356→              className="text-2xl font-bold tracking-[0.3em] text-[var(--primary)] mt-1"
+  1357→              style={headFont}
+  1358→            >
+  1359→              {roomCode.toUpperCase()}
+  1360→            </div>
+  1361→            <button
+  1362→              onClick={copyInviteLink}
+  1363→              className="text-[10px] text-[var(--muted-foreground)] hover:text-[var(--primary)] mt-2 transition-colors"
+  1364→            >
+  1365→              📋 COPIAR LINK DE INVITACIÓN
+  1366→            </button>
+  1367→          </div>
+  1368→
+  1369→          {/* Players */}
+  1370→          <div>
+  1371→            <div className="text-[10px] tracking-widest text-[var(--muted-foreground)] mb-2">
+  1372→              DETECTIVES EN SALA ({lobbyPlayers.length}/2)
+  1373→            </div>
+  1374→            {lobbyPlayers.map((p) => (
+  1375→              <div
+  1376→                key={p.id}
+  1377→                className="flex items-center gap-2 py-1 border-b border-[var(--border)] text-xs"
+  1378→              >
+  1379→                <span className="text-[var(--primary)]">
+  1380→                  {p.isHost ? "👑" : "🔍"}
+  1381→                </span>
+  1382→                <span
+  1383→                  className={cn(
+  1384→                    p.isHost
+  1385→                      ? "text-[var(--primary)] font-bold"
+  1386→                      : "text-[var(--foreground)]"
+  1387→                  )}
+  1388→                >
+  1389→                  {p.username}
+  1390→                </span>
+  1391→                {p.isHost && (
+  1392→                  <span className="text-[9px] text-[var(--muted-foreground)] ml-auto tracking-widest">
+  1393→                    ANFITRIÓN
+  1394→                  </span>
+  1395→                )}
+  1396→              </div>
+  1397→            ))}
+  1398→          </div>
+  1399→
+  1400→          {/* Time display */}
+  1401→          <div>
+  1402→            <div className="text-[10px] tracking-widest text-[var(--muted-foreground)] mb-2">
+  1403→              TIEMPO DE RONDA
+  1404→            </div>
+  1405→            <div className="grid grid-cols-3 gap-2">
+  1406→              {([5, 8, 12] as const).map((t) => (
+  1407→                <button
+  1408→                  key={t}
+  1409→                  onClick={() => setRoundTime(t)}
+  1410→                  disabled={!session?.isHost}
+  1411→                  className={cn(
+  1412→                    "pixel-frame p-2 text-center transition-colors cursor-pointer",
+  1413→                    roundTime === t
+  1414→                      ? "border-[var(--primary)] bg-[var(--primary)]/20"
+  1415→                      : "hover:bg-[var(--accent)]"
+  1416→                  )}
+  1417→                >
+  1418→                  <div className="text-lg font-bold">{t}</div>
+  1419→                  <div className="text-[9px] text-[var(--muted-foreground)]">MIN</div>
+  1420→                </button>
+  1421→              ))}
+  1422→            </div>
+  1423→          </div>
+  1424→
+  1425→          {/* Start button */}
+  1426→          {session?.isHost && (
+  1427→            <button
+  1428→              onClick={handleStartGame}
+  1429→              className="pixel-btn w-full py-3"
+  1430→              style={headFont}
+  1431→            >
+  1432→              COMENZAR
+  1433→            </button>
+  1434→          )}
+  1435→
+  1436→          {!session?.isHost && (
+  1437→            <div className="text-center text-xs text-[var(--muted-foreground)] italic animate-pulse">
+  1438→              Esperando al anfitrión para empezar...
+  1439→            </div>
+  1440→          )}
+  1441→
+  1442→          <button
+  1443→            onClick={leaveRoom}
+  1444→            className="w-full py-2 text-[10px] tracking-widest text-[var(--muted-foreground)] border-2 border-[var(--border)] hover:text-[var(--destructive)] hover:border-[var(--destructive)] transition-colors"
+  1445→          >
+  1446→            SALIR DE LA SALA
+  1447→          </button>
+  1448→        </div>
+  1449→      </main>
+  1450→    );
+  1451→  }
+  1452→
+  1453→  /* ═══════════════════════════════════════════════════════════════════════
+  1454→   * RENDER: PHASE: generating_case (Minecraft-style seed generation)
+  1455→   * Host-only screen. Non-host wait in the lobby for game.start.
+  1456→   * ═══════════════════════════════════════════════════════════════════════ */
+  1457→
+  1458→  if (phase === "generating_case") {
+  1459→    return (
+  1460→      <CaseGeneratorScreen
+  1461→        onCaseReady={handleCaseReady}
+  1462→        onBack={() => setPhase("lobby")}
+  1463→      />
+  1464→    );
+  1465→  }
+  1466→
+  1467→  /* ═══════════════════════════════════════════════════════════════════════
+  1468→   * RENDER: PHASE: case_intro (click-to-advance)
+  1469→   * ═══════════════════════════════════════════════════════════════════════ */
+  1470→
+  1471→  if (phase === "case_intro" && currentCase) {
+  1472→    const c = currentCase;
+  1473→    const s = c.suspect;
+  1474→    const totalSteps = 6;
+  1475→
+  1476→    return (
+  1477→      <main className="min-h-screen flex flex-col items-center justify-center  p-6 select-none">
+  1478→        {AchievementOverlay}
+  1479→        <div className="max-w-2xl w-full space-y-6 text-center">
+  1480→          {/* Step 0: Case title + subtitle */}
+  1481→          {caseIntroStep >= 0 && (
+  1482→            <div className={cn("transition-all duration-500", caseIntroStep === 0 ? "opacity-100" : "opacity-50")}>
+  1483→              <h1
+  1484→                className="text-2xl md:text-4xl font-bold text-[var(--primary)] tracking-widest"
+  1485→                style={headFont}
+  1486→              >
+  1487→                {c.title}
+  1488→              </h1>
+  1489→              <div
+  1490→                className="text-[10px] tracking-[0.4em] text-[var(--muted-foreground)] mt-2"
+  1491→                style={bodyFont}
+  1492→              >
+  1493→                {c.subtitle}
+  1494→              </div>
+  1495→            </div>
+  1496→          )}
+  1497→
+  1498→          {/* Step 1: Date + Location + Stakes */}
+  1499→          {caseIntroStep >= 1 && (
+  1500→            <div className={cn("transition-all duration-500", caseIntroStep === 1 ? "opacity-100" : "opacity-50")}>
+  1501→              <div
+  1502→                className="text-sm text-[var(--primary)] tracking-widest"
+  1503→                style={bodyFont}
+  1504→              >
+  1505→                📅 {c.date}
+  1506→              </div>
+  1507→              <div
+  1508→                className="text-xs text-[var(--muted-foreground)] tracking-widest mt-1"
+  1509→                style={bodyFont}
+  1510→              >
+  1511→                📍 {c.location}
+  1512→              </div>
+  1513→              <div
+  1514→                className="text-xs text-[var(--destructive)] tracking-wider mt-2"
+  1515→                style={bodyFont}
+  1516→              >
+  1517→                ⚖️ {c.stakes}
+  1518→              </div>
+  1519→            </div>
+  1520→          )}
+  1521→
+  1522→          {/* Step 2: Full briefing */}
+  1523→          {caseIntroStep >= 2 && (
+  1524→            <div className={cn("pixel-frame p-4 transition-all duration-500", caseIntroStep === 2 ? "opacity-100" : "opacity-50")}>
+  1525→              <p
+  1526→                className="text-sm text-[var(--foreground)] leading-relaxed text-left"
+  1527→                style={bodyFont}
+  1528→              >
+  1529→                {c.briefing}
+  1530→              </p>
+  1531→            </div>
+  1532→          )}
+  1533→
+  1534→          {/* Step 3: Suspect info */}
+  1535→          {caseIntroStep >= 3 && (
+  1536→            <div className={cn("pixel-frame p-4 transition-all duration-500", caseIntroStep === 3 ? "opacity-100" : "opacity-50")}>
+  1537→              <div className="text-[10px] tracking-widest text-[var(--muted-foreground)] mb-3" style={bodyFont}>
+  1538→                SOSPECHOSO
+  1539→              </div>
+  1540→              <div className="flex items-center gap-4">
+  1541→                <div className="text-4xl">{s.avatar}</div>
+  1542→                <div className="text-left">
+  1543→                  <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>
+  1544→                    {s.name}
+  1545→                  </div>
+  1546→                  <div className="text-xs text-[var(--muted-foreground)] mt-1" style={bodyFont}>
+  1547→                    {s.age} años · {s.role}
+  1548→                  </div>
+  1549→                </div>
+  1550→              </div>
+  1551→            </div>
+  1552→          )}
+  1553→
+  1554→          {/* Step 4: Known facts */}
+  1555→          {caseIntroStep >= 4 && (
+  1556→            <div className={cn("pixel-frame p-4 text-left transition-all duration-500", caseIntroStep === 4 ? "opacity-100" : "opacity-50")}>
+  1557→              <div className="text-[10px] tracking-widest text-[var(--muted-foreground)] mb-3" style={bodyFont}>
+  1558→                HECHOS CONOCIDOS
+  1559→              </div>
+  1560→              <ul className="space-y-1">
+  1561→                {s.knownFacts.map((f, i) => (
+  1562→                  <li key={i} className="text-xs text-[var(--foreground)] flex gap-2" style={bodyFont}>
+  1563→                    <span className="text-[var(--primary)] shrink-0">•</span>
+  1564→                    {f}
+  1565→                  </li>
+  1566→                ))}
+  1567→              </ul>
+  1568→            </div>
+  1569→          )}
+  1570→
+  1571→          {/* Step 5: Start button */}
+  1572→          {caseIntroStep >= totalSteps - 1 ? (
+  1573→            <button
+  1574→              onClick={handleStartInterrogation}
+  1575→              className="pixel-btn py-3 px-8 mt-4"
+  1576→              style={headFont}
+  1577→            >
+  1578→              COMENZAR INTERROGATORIO ▶
+  1579→            </button>
+  1580→          ) : (
+  1581→            <button
+  1582→              onClick={() => setCaseIntroStep((prev) => Math.min(prev + 1, totalSteps - 1))}
+  1583→              className="pixel-btn-secondary py-2 px-6 mt-4"
+  1584→              style={bodyFont}
+  1585→            >
+  1586→              CONTINUAR &gt;
+  1587→            </button>
+  1588→          )}
+  1589→        </div>
+  1590→      </main>
+  1591→    );
+  1592→  }
+  1593→
+  1594→  /* ═══════════════════════════════════════════════════════════════════════
+  1595→   * RENDER: PHASE: playing (THE MAIN GAME)
+  1596→   * ═══════════════════════════════════════════════════════════════════════ */
+  1597→
+  1598→  if (phase === "playing" && currentCase) {
+  1599→    const suspect = currentCase.suspect;
+  1600→
+  1601→    /* ─── Stress Bar Component ─── */
+  1602→    const StressBar = ({
+  1603→      label,
+  1604→      value,
+  1605→      colorClass,
+  1606→      emoji,
+  1607→    }: {
+  1608→      label: string;
+  1609→      value: number;
+  1610→      colorClass: string;
+  1611→      emoji: string;
+  1612→    }) => (
+  1613→      <div className="space-y-1">
+  1614→        <div className="flex justify-between text-[9px]" style={bodyFont}>
+  1615→          <span className="text-[var(--muted-foreground)]">
+  1616→            {emoji} {label}
+  1617→          </span>
+  1618→          <span className={value > 70 ? "text-[var(--destructive)] font-bold" : "text-[var(--muted-foreground)]"}>
+  1619→            {value}%
+  1620→          </span>
+  1621→        </div>
+  1622→        <div className="pixel-stress-bar">
+  1623→          <div
+  1624→            className={cn("pixel-stress-bar-fill", colorClass)}
+  1625→            style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+  1626→          />
+  1627→        </div>
+  1628→      </div>
+  1629→    );
+  1630→
+  1631→    /* ─── Right Panel Tabs (desktop) ─── */
+  1632→    const RightTabs = () => {
+  1633→      const tabList = [
+  1634→        { key: "expediente" as const, label: "EXPEDIENTE" },
+  1635→        { key: "notas" as const, label: "NOTAS" },
+  1636→        { key: "timeline" as const, label: "TIMELINE" },
+  1637→        { key: "detectives" as const, label: "DETECTIVES" },
+  1638→        { key: "herramientas" as const, label: "HERRAMIENTAS" },
+  1639→      ];
+  1640→
+  1641→      return (
+  1642→        <div>
+  1643→          <div className="flex border-b-2 border-[var(--border)]">
+  1644→            {tabList.map((tab) => (
+  1645→              <button
+  1646→                key={tab.key}
+  1647→                onClick={() => setRightTab(tab.key)}
+  1648→                className={cn(
+  1649→                  "px-2 py-1.5 text-[8px] tracking-wider transition-colors cursor-pointer",
+  1650→                  rightTab === tab.key
+  1651→                    ? "text-[var(--primary)] border-b-2 border-[var(--primary)] bg-[var(--primary)]/5"
+  1652→                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+  1653→                )}
+  1654→                style={bodyFont}
+  1655→              >
+  1656→                {tab.label}
+  1657→              </button>
+  1658→            ))}
+  1659→          </div>
+  1660→
+  1661→          <div className="p-3 pixel-scroll max-h-80 overflow-y-auto" style={bodyFont}>
+  1662→            {/* EXPEDIENTE */}
+  1663→            {rightTab === "expediente" && (
+  1664→              <div className="space-y-3">
+  1665→                <div className="text-[10px] tracking-widest text-[var(--primary)] font-bold">
+  1666→                  RESUMEN DEL CASO
+  1667→                </div>
+  1668→                <p className="text-xs text-[var(--foreground)] leading-relaxed">
+  1669→                  {currentCase.briefing}
+  1670→                </p>
+  1671→                <div className="border-t border-[var(--border)] pt-2">
+  1672→                  <div className="text-[10px] tracking-widest text-[var(--muted-foreground)] mb-1">
+  1673→                    SOSPECHOSO
+  1674→                  </div>
+  1675→                  <div className="text-xs text-[var(--foreground)]">
+  1676→                    {suspect.avatar} <strong>{suspect.name}</strong> — {suspect.age} años — {suspect.role}
+  1677→                  </div>
+  1678→                </div>
+  1679→                <div className="border-t border-[var(--border)] pt-2">
+  1680→                  <div className="text-[10px] tracking-widest text-[var(--muted-foreground)] mb-2">
+  1681→                    HECHOS CONOCIDOS
+  1682→                  </div>
+  1683→                  {suspect.knownFacts.map((f, i) => (
+  1684→                    <div key={i} className="text-xs text-[var(--foreground)] mb-1 flex gap-2">
+  1685→                      <span className="text-[var(--primary)]">•</span>
+  1686→                      {f}
+  1687→                    </div>
+  1688→                  ))}
+  1689→                </div>
+  1690→              </div>
+  1691→            )}
+  1692→
+  1693→            {/* NOTAS */}
+  1694→            {rightTab === "notas" && (
+  1695→              <div className="space-y-2">
+  1696→                <div className="text-[10px] tracking-widest text-[var(--primary)] font-bold">
+  1697→                  NOTAS COMPARTIDAS
+  1698→                </div>
+  1699→                <textarea
+  1700→                  value={notes}
+  1701→                  onChange={(e) => setNotes(e.target.value)}
+  1702→                  className="pixel-input w-full min-h-[200px] resize-none text-xs"
+  1703→                  placeholder="Escribe tus notas aquí... (compartidas con el otro detective)"
+  1704→                />
+  1705→              </div>
+  1706→            )}
+  1707→
+  1708→            {/* TIMELINE */}
+  1709→            {rightTab === "timeline" && (
+  1710→              <div className="space-y-2">
+  1711→                <div className="flex items-center justify-between">
+  1712→                  <div className="text-[10px] tracking-widest text-[var(--primary)] font-bold">
+  1713→                    LÍNEA TEMPORAL
+  1714→                  </div>
+  1715→                  <button onClick={addTimelineEntry} className="pixel-btn-secondary text-[8px] py-1 px-2">
+  1716→                    + AGREGAR
+  1717→                  </button>
+  1718→                </div>
+  1719→                {timelineEntries.length === 0 ? (
+  1720→                  <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">
+  1721→                    Sin eventos en la línea temporal
+  1722→                  </div>
+  1723→                ) : (
+  1724→                  <div className="space-y-2">
+  1725→                    {timelineEntries.map((entry) => (
+  1726→                      <div key={entry.id} className="pixel-frame p-2">
+  1727→                        <div className="text-[10px] text-[var(--primary)] font-bold tracking-wider">
+  1728→                          {entry.label}
+  1729→                        </div>
+  1730→                        <div className="text-xs text-[var(--foreground)] mt-0.5">
+  1731→                          {entry.description}
+  1732→                        </div>
+  1733→                        <div className="text-[8px] text-[var(--muted-foreground)] mt-1">
+  1734→                          — {entry.addedByName}
+  1735→                        </div>
+  1736→                      </div>
+  1737→                    ))}
+  1738→                  </div>
+  1739→                )}
+  1740→              </div>
+  1741→            )}
+  1742→
+  1743→            {/* DETECTIVES (private chat) */}
+  1744→            {rightTab === "detectives" && (
+  1745→              <div className="flex flex-col h-64">
+  1746→                <div className="text-[10px] tracking-widest text-[var(--primary)] font-bold mb-2">
+  1747→                  CHAT PRIVADO — DETECTIVES
+  1748→                </div>
+  1749→                <div className="flex-1 pixel-scroll overflow-y-auto space-y-2 mb-2">
+  1750→                  {detectiveMessages.map((dm, i) => (
+  1751→                    <div key={i} className="text-xs">
+  1752→                      <span className="text-[var(--primary)] font-bold">
+  1753→                        [{dm.detectiveName}]:
+  1754→                      </span>{" "}
+  1755→                      <span className="text-[var(--foreground)]">{dm.text}</span>
+  1756→                    </div>
+  1757→                  ))}
+  1758→                  {detectiveMessages.length === 0 && (
+  1759→                    <div className="text-xs text-[var(--muted-foreground)] italic text-center py-4">
+  1760→                      Sin mensajes privados
+  1761→                    </div>
+  1762→                  )}
+  1763→                </div>
+  1764→                <form onSubmit={handleSendDetective} className="flex gap-1">
+  1765→                  <input
+  1766→                    value={detectiveDraft}
+  1767→                    onChange={(e) => setDetectiveDraft(e.target.value)}
+  1768→                    className="pixel-input flex-1 text-xs"
+  1769→                    placeholder="Mensaje privado..."
+  1770→                  />
+  1771→                  <button type="submit" className="pixel-btn text-[8px] px-2">
+  1772→                    ENVIAR
+  1773→                  </button>
+  1774→                </form>
+  1775→              </div>
+  1776→            )}
+  1777→
+  1778→            {/* HERRAMIENTAS (quick questions) */}
+  1779→            {rightTab === "herramientas" && (
+  1780→              <div className="space-y-2">
+  1781→                <div className="text-[10px] tracking-widest text-[var(--primary)] font-bold mb-2">
+  1782→                  CATEGORÍAS DE INTERROGACIÓN
+  1783→                </div>
+  1784→                {QUICK_QUESTIONS.map((q) => (
+  1785→                  <button
+  1786→                    key={q.label}
+  1787→                    onClick={() => insertQuickQuestion(q.text)}
+  1788→                    className="pixel-frame w-full p-2 text-left hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
+  1789→                  >
+  1790→                    <div className="text-[9px] text-[var(--primary)] tracking-wider font-bold">
+  1791→                      {q.label.toUpperCase()}
+  1792→                    </div>
+  1793→                    <div className="text-xs text-[var(--foreground)] mt-0.5">
+  1794→                      "{q.text}"
+  1795→                    </div>
+  1796→                  </button>
+  1797→                ))}
+  1798→              </div>
+  1799→            )}
+  1800→          </div>
+  1801→        </div>
+  1802→      );
+  1803→    };
+  1804→
+  1805→    /* ─── Mobile bottom tabs ─── */
+  1806→    const MobileTabs = () => (
+  1807→      <div className="md:hidden flex border-t-2 border-[var(--border)] bg-[var(--card)]">
+  1808→        {[
+  1809→          { key: "chat" as const, label: "💬 CHAT" },
+  1810→          { key: "sospechoso" as const, label: `${suspect.avatar} SOSPECHOSO` },
+  1811→          { key: "panel" as const, label: "📋 PANEL" },
+  1812→        ].map((tab) => (
+  1813→          <button
+  1814→            key={tab.key}
+  1815→            onClick={() => setMobileTab(tab.key)}
+  1816→            className={cn(
+  1817→              "flex-1 py-2 text-[8px] tracking-wider transition-colors cursor-pointer",
+  1818→              mobileTab === tab.key
+  1819→                ? "text-[var(--primary)] bg-[var(--primary)]/5 border-b-2 border-[var(--primary)]"
+  1820→                : "text-[var(--muted-foreground)]"
+  1821→            )}
+  1822→            style={bodyFont}
+  1823→          >
+  1824→            {tab.label}
+  1825→          </button>
+  1826→        ))}
+  1827→      </div>
+  1828→    );
+  1829→
+  1830→    return (
+  1831→      <div className="min-h-screen flex flex-col " style={bodyFont}>
+  1832→        {AchievementOverlay}
+  1833→
+  1834→        {/* Top bar */}
+  1835→        <header className="border-b-2 border-[var(--border)] bg-[var(--card)] px-3 py-2 flex items-center justify-between shrink-0">
+  1836→          <div className="flex items-center gap-3">
+  1837→            <span className="text-[var(--primary)] pixel-live-dot" />
+  1838→            <span className="text-[9px] tracking-widest text-[var(--muted-foreground)]">
+  1839→              INTERROGACIÓN EN CURSO
+  1840→            </span>
+  1841→          </div>
+  1842→          <div className="flex items-center gap-3">
+  1843→            <span className="text-xs font-bold text-[var(--primary)]" style={headFont}>
+  1844→              ⏱ {formatTime(timeRemaining)}
+  1845→            </span>
+  1846→            <button
+  1847→              onClick={enterDeliberation}
+  1848→              className="pixel-btn-danger text-[8px] py-1 px-2"
+  1849→            >
+  1850→              DELIBERAR
+  1851→            </button>
+  1852→          </div>
+  1853→        </header>
+  1854→
+  1855→        {/* Main content area */}
+  1856→        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+  1857→          {/* ── LEFT: Suspect panel (hidden on mobile, shown on md+) ── */}
+  1858→          <aside className="hidden md:flex flex-col w-64 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
+  1859→            <div className="pixel-header">
+  1860→              <span>SOSPECHOSO</span>
+  1861→            </div>
+  1862→            <div className="p-4 space-y-4 flex-1">
+  1863→              {/* Avatar + name */}
+  1864→              <div className="text-center">
+  1865→                <div className="flex justify-center mb-3">
+  1866→                  <SuspectPortrait
+  1867→                    seed={currentCase?.id?.replace("gen_", "") ?? "default"}
+  1868→                    gender={recallGender(currentCase?.id?.replace("gen_", "") ?? "default")}
+  1869→                    avatar={suspect.avatar}
+  1870→                    size="lg"
+  1871→                  />
+  1872→                </div>
+  1873→                <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>
+  1874→                  {suspect.name}
+  1875→                </div>
+  1876→                <div className="text-xs text-[var(--muted-foreground)] mt-1">
+  1877→                  {suspect.age ? `${suspect.age} años` : ""}
+  1878→                </div>
+  1879→                <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">
+  1880→                  {suspect.role}
+  1881→                </div>
+  1882→              </div>
+  1883→
+  1884→              {/* Stress bars */}
+  1885→              <div className="space-y-2">
+  1886→                <StressBar label="ESTRÉS" value={stress.stress} colorClass="stress" emoji="🔵" />
+  1887→                <StressBar label="CONFIANZA" value={stress.confidence} colorClass="confidence" emoji="🔷" />
+  1888→                <StressBar label="HOSTILIDAD" value={stress.hostility} colorClass="hostility" emoji="🔺" />
+  1889→              </div>
+  1890→
+  1891→              {/* Known facts */}
+  1892→              <div className="border-t border-[var(--border)] pt-3">
+  1893→                <div className="text-[10px] tracking-widest text-[var(--muted-foreground)] mb-2">
+  1894→                  HECHOS CONOCIDOS
+  1895→                </div>
+  1896→                <div className="space-y-1 pixel-scroll max-h-32 overflow-y-auto">
+  1897→                  {suspect.knownFacts.map((f, i) => (
+  1898→                    <div key={i} className="text-[10px] text-[var(--foreground)] flex gap-1.5">
+  1899→                      <span className="text-[var(--primary)] shrink-0">•</span>
+  1900→                      {f}
+  1901→                    </div>
+  1902→                  ))}
+  1903→                </div>
+  1904→              </div>
+  1905→            </div>
+  1906→          </aside>
+  1907→
+  1908→          {/* ── CENTER: Chat (main on mobile, center on desktop) ── */}
+  1909→          <section className={cn(
+  1910→            "flex-1 flex flex-col min-h-0",
+  1911→            mobileTab !== "chat" && "hidden md:flex"
+  1912→          )}>
+  1913→            {/* Chat messages */}
+  1914→            <div className="flex-1 overflow-y-auto pixel-scroll p-4 space-y-3">
+  1915→              {chatMessages.length === 0 && (
+  1916→                <div className="text-center text-xs text-[var(--muted-foreground)] italic py-8">
+  1917→                  La sala está en silencio. Haz la primera pregunta...
+  1918→                </div>
+  1919→              )}
+  1920→              {chatMessages.map((msg, i) => {
+  1921→                const isDetective = msg.senderType === "detective";
+  1922→                const isSystem = msg.senderType === "system";
+  1923→                const isFlagged = msg.type === "suspect.answer" && (i > 0 && chatMessages[i - 1]?.text === msg.text); // placeholder logic
+  1924→
+  1925→                return (
+  1926→                  <div key={`chat-${i}`} className={cn(
+  1927→                    "flex flex-col",
+  1928→                    isDetective ? "items-start" : "items-end",
+  1929→                    isSystem && "items-center"
+  1930→                  )}>
+  1931→                    {/* System event */}
+  1932→                    {isSystem && (
+  1933→                      <div className="text-[9px] text-[var(--muted-foreground)] italic text-center px-4 py-1 border border-[var(--border)] bg-[var(--accent)]">
+  1934→                        {msg.text}
+  1935→                      </div>
+  1936→                    )}
+  1937→
+  1938→                    {/* Detective question */}
+  1939→                    {isDetective && !isSystem && (
+  1940→                      <div className="max-w-[80%]">
+  1941→                        <div className="text-[9px] text-[var(--primary)] tracking-wider mb-0.5">
+  1942→                          [Detective {msg.senderName} pregunta]
+  1943→                        </div>
+  1944→                        <div className="pixel-frame p-2.5 text-xs text-[var(--foreground)]">
+  1945→                          {msg.text}
+  1946→                        </div>
+  1947→                      </div>
+  1948→                    )}
+  1949→
+  1950→                    {/* Suspect answer — with typewriter reveal */}
+  1951→                    {msg.senderType === "suspect" && (
+  1952→                      <div className="max-w-[80%] pixel-message-in">
+  1953→                        <div className="text-[9px] text-[var(--muted-foreground)] tracking-wider mb-0.5 text-right flex items-center justify-end gap-2">
+  1954→                          <span className="pixel-badge">SOSPECHOSO</span>
+  1955→                          <span>[{msg.senderName || "SOSPECHOSO"} responde]</span>
+  1956→                        </div>
+  1957→                        <div className={cn(
+  1958→                          "pixel-frame p-2.5 text-xs",
+  1959→                          msg.type === "suspect.autonomous"
+  1960→                            ? "text-[var(--muted-foreground)] italic"
+  1961→                            : "text-[var(--foreground)]"
+  1962→                        )}>
+  1963→                          {msg.type === "suspect.autonomous" && (
+  1964→                            <span className="text-[8px] text-[var(--muted-foreground)] tracking-wider block mb-1">
+  1965→                              *pensamiento autónomo*
+  1966→                            </span>
+  1967→                          )}
+  1968→                          <TypewriterText text={msg.text} speed={22} />
+  1969→                        </div>
+  1970→                      </div>
+  1971→                    )}
+  1972→                  </div>
+  1973→                );
+  1974→              })}
+  1975→
+  1976→              {pending && (
+  1977→                <div className="flex justify-end">
+  1978→                  <div className="pixel-frame p-2.5 text-xs text-[var(--muted-foreground)]">
+  1979→                    <TypingIndicator label="El sospechoso está respondiendo" />
+  1980→                  </div>
+  1981→                </div>
+  1982→              )}
+  1983→
+  1984→              <div ref={chatEndRef} />
+  1985→            </div>
+  1986→
+  1987→            {/* Chat input */}
+  1988→            <form
+  1989→              onSubmit={handleInterrogate}
+  1990→              className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0"
+  1991→            >
+  1992→              <input
+  1993→                ref={chatInputRef}
+  1994→                value={chatDraft}
+  1995→                onChange={(e) => setChatDraft(e.target.value)}
+  1996→                className="pixel-input flex-1 text-xs"
+  1997→                placeholder={`Pregunta al sospechoso...`}
+  1998→                disabled={pending}
+  1999→              />
+  2000→              <button
+
+[showing lines 1-2000 of 2570; use offset=2001 with limit to continue reading]
