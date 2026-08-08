@@ -655,9 +655,12 @@ export default function Home() {
         unlockAchievement("gotcha");
         setTimeout(() => SFX.soundLieDetected(), 150);
       }
-      // TTS: speak the suspect's answer aloud (robotic pixel voice).
-      // Small delay so it lands after the typewriter starts.
-      setTimeout(() => speak(answerText), 300);
+      // TTS: speak the suspect's answer aloud IN SYNC with the typewriter.
+      // No delay — the voice starts the moment the message renders and the
+      // typewriter begins revealing characters. Voice gender matches the
+      // suspect's gender so men sound male and women sound female.
+      const suspectGender = recallGender(currentCase?.id?.replace("gen_", "") ?? "default");
+      speak(answerText, suspectGender);
 
       if (questionsAsked === 0) unlockAchievement("first_blood");
       if (data.stress?.stress >= 90) unlockAchievement("pressure_cooker");
