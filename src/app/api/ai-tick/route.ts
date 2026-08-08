@@ -1,24 +1,23 @@
 /**
  * POST /api/ai-tick — Autonomous suspect event.
+ * Accepts systemPrompt directly (works with AI-generated cases).
  */
 
 import { NextResponse } from "next/server";
-import { findSuspect } from "@/lib/ai/suspects";
 import { generateAutonomousEvent } from "@/lib/ai/llm";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { suspectId, recentContext, stressLevel } = body;
+    const { suspectId, suspectName, suspectAvatar, systemPrompt, recentContext, stressLevel } = body;
 
-    const suspect = findSuspect(suspectId);
-    if (!suspect) {
-      return NextResponse.json({ error: "unknown_suspect" }, { status: 404 });
+    if (!systemPrompt) {
+      return NextResponse.json({ error: "missing_system_prompt" }, { status: 400 });
     }
 
     const t0 = Date.now();
     const event = await generateAutonomousEvent(
-      suspect.systemPrompt,
+      systemPrompt,
       recentContext || "Silencio en la sala.",
       stressLevel || 30
     );
@@ -29,9 +28,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       event: {
-        suspectId: suspect.id,
-        suspectName: suspect.name,
-        avatar: suspect.avatar,
+        suspectId: suspectId ?? "unknown",
+        suspectName: suspectName ?? "SOSPECHOSO",
+        avatar: suspectAvatar ?? "👤",
         kind: event.kind,
         text: event.text,
       },

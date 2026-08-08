@@ -2,21 +2,32 @@
  * POST /api/interrogate
  *
  * Generates a suspect reply with FULL conversation history for memory.
- * Returns answer text + updated stress levels (with noise for display).
+ * Accepts systemPrompt directly (works with AI-generated cases).
  */
 
 import { NextResponse } from "next/server";
-import { findSuspect } from "@/lib/ai/suspects";
 import { generateSuspectReply } from "@/lib/ai/llm";
 import type { StressState } from "@/lib/types/game";
 
+interface StressRule {
+  match: string;
+  stressDelta: number;
+  coherenceDelta: number;
+  bpmDelta: number;
+  label: string;
+}
+
 interface RequestBody {
   suspectId: string;
+  suspectName?: string;
+  suspectAvatar?: string;
+  systemPrompt?: string;
   question: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
   previousStress?: StressState;
   presentedEvidence?: { label: string; description: string };
   technique?: string;
+  stressRules?: StressRule[];
 }
 
 export async function POST(req: Request) {
@@ -27,16 +38,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  if (!body.suspectId || typeof body.question !== "string") {
+  if (!body.systemPrompt || typeof body.question !== "string") {
     return NextResponse.json(
       { error: "missing_fields" },
       { status: 400 }
     );
-  }
-
-  const suspect = findSuspect(body.suspectId);
-  if (!suspect) {
-    return NextResponse.json({ error: "unknown_suspect" }, { status: 404 });
   }
 
   const q = body.question.toLowerCase();
@@ -45,13 +51,18 @@ export async function POST(req: Request) {
   let hostilityDelta = 0;
   let trigger: string | undefined;
 
-  for (const rule of suspect.stressRules) {
-    if (rule.match.test(q)) {
-      stressDelta += rule.stressDelta;
-      confidenceDelta += rule.confidenceDelta;
-      hostilityDelta += rule.hostilityDelta;
-      trigger = rule.label;
-      break;
+  // Apply stress rules from request body (compiled regexes)
+  if (body.stressRules && Array.isArray(body.stressRules)) {
+    for (const rule of body.stressRules) {
+      try {
+        if (new RegExp(rule.match, "i").test(q)) {
+          stressDelta += rule.stressDelta;
+          confidenceDelta += rule.coherenceDelta;
+          hostilityDelta += Math.round(rule.bpmDelta / 2);
+          trigger = rule.label;
+          break;
+        }
+      } catch { /* invalid regex, skip */ }
     }
   }
 
@@ -86,16 +97,16 @@ export async function POST(req: Request) {
   const clamp = (n: number, min: number, max: number) =>
     Math.max(min, Math.min(max, n));
 
-  const relax = 0.06;
+  // Baseline relaxation toward 40% stress, 60% confidence, 20% hostility
   const baseStress = prevStress
-    ? prevStress.stress + (suspect.baseline.stress - prevStress.stress) * relax
-    : suspect.baseline.stress;
+    ? prevStress.stress + (40 - prevStress.stress) * 0.06
+    : 30;
   const baseConfidence = prevStress
-    ? prevStress.confidence + (suspect.baseline.confidence - prevStress.confidence) * relax
-    : suspect.baseline.confidence;
+    ? prevStress.confidence + (60 - prevStress.confidence) * 0.06
+    : 70;
   const baseHostility = prevStress
-    ? prevStress.hostility + (suspect.baseline.hostility - prevStress.hostility) * relax
-    : suspect.baseline.hostility;
+    ? prevStress.hostility + (20 - prevStress.hostility) * 0.06
+    : 20;
 
   const actualStress: StressState = {
     stress: clamp(Math.round(baseStress + stressDelta), 0, 100),
@@ -122,7 +133,7 @@ export async function POST(req: Request) {
   const fullQuestion = body.question + evidenceModifier + techniqueModifier;
 
   const reply = await generateSuspectReply({
-    systemPrompt: suspect.systemPrompt,
+    systemPrompt: body.systemPrompt,
     history: Array.isArray(body.history) ? body.history : [],
     question: fullQuestion,
     stressLevel: actualStress.stress,
@@ -141,9 +152,9 @@ export async function POST(req: Request) {
   return NextResponse.json({
     answer: {
       text: reply.text,
-      suspectId: suspect.id,
-      suspectName: suspect.name,
-      avatar: suspect.avatar,
+      suspectId: body.suspectId,
+      suspectName: body.suspectName ?? "SOSPECHOSO",
+      avatar: body.suspectAvatar ?? "👤",
       flagged,
     },
     stress: displayStress,

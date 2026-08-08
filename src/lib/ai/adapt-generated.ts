@@ -155,10 +155,10 @@ export function adaptGeneratedCase(generated: GeneratedCase): CaseInfo {
   const confidence = s.baseline.coherence;
   const hostility = Math.round(Math.max(0, Math.min(100, (s.baseline.bpm - 60) * 1.2)));
 
-  // Build known facts from timeline + evidence
+  // Build known facts — ONLY public, non-spoiler information
   const facts: string[] = [];
 
-  // Add public timeline events as known facts
+  // Add public timeline events as known facts (objective facts only)
   if (generated.timeline) {
     for (const te of generated.timeline) {
       if (te.isPublic) {
@@ -167,17 +167,14 @@ export function adaptGeneratedCase(generated: GeneratedCase): CaseInfo {
     }
   }
 
-  // Add evidence descriptions that don't have unlock topics (always visible)
-  for (const ev of generated.evidence) {
-    if (!ev.unlockTopic) {
-      facts.push(`${ev.label}: ${ev.description}`);
-    }
+  // Add alibi claim (what the suspect says, not what actually happened)
+  if (s.alibi) {
+    facts.push(`Coartada declarada: ${s.alibi.claimed}`);
   }
 
-  // Add alibi as a known fact
-  if (s.alibi) {
-    facts.push(`Coartada: ${s.alibi.claimed}`);
-  }
+  // NOTE: Evidence is shown in the evidence board, NOT here.
+  // Evidence descriptions often contain plot-relevant information
+  // that should be discovered during interrogation, not given upfront.
 
   const suspect: Suspect = {
     id: `gen_${generated.seed}`,

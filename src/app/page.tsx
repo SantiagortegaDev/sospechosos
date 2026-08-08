@@ -484,7 +484,7 @@ export default function Home() {
       try {
         const historySlice = conversationHistory.slice(-20);
         const context = historySlice.map((t) => `${t.role === "detective" ? "Detective" : "Sospechoso"}: ${t.text}`).join("\n") || "La sala está en silencio.";
-        const res = await fetch("/api/ai-tick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suspectId: currentCase.suspect.id, recentContext: context, stressLevel: stress.stress }) });
+        const res = await fetch("/api/ai-tick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suspectId: currentCase.suspect.id, suspectName: currentCase.suspect.name, suspectAvatar: currentCase.suspect.avatar, systemPrompt: currentCase.suspect.systemPrompt, recentContext: context, stressLevel: stress.stress }) });
         if (!res.ok) return;
         const data = await res.json();
         if (data.skipped || !data.event) return;
@@ -597,7 +597,23 @@ export default function Home() {
     }));
 
     try {
-      const body: any = { suspectId: currentCase.suspect.id, question: text, history: conversationHistory.slice(-20), previousStress: stress };
+      const stressRulesRaw = currentCase.suspect.stressRules.map(r => ({
+        match: r.match.source,
+        stressDelta: r.stressDelta,
+        coherenceDelta: r.confidenceDelta,
+        bpmDelta: r.hostilityDelta * 2,
+        label: r.label,
+      }));
+      const body: any = {
+        suspectId: currentCase.suspect.id,
+        suspectName: currentCase.suspect.name,
+        suspectAvatar: currentCase.suspect.avatar,
+        systemPrompt: currentCase.suspect.systemPrompt,
+        stressRules: stressRulesRaw,
+        question: text,
+        history: conversationHistory.slice(-20),
+        previousStress: stress,
+      };
       if (selectedEvidence) { body.presentedEvidence = { label: selectedEvidence.label, description: selectedEvidence.description }; }
       if (technique !== "neutral") { body.technique = technique; }
 
@@ -1081,12 +1097,39 @@ export default function Home() {
     const portraitShake = stress.stress >= 80;
     const portraitTint = stress.stress >= 70 ? "hue-rotate(340deg) brightness(0.9)" : stress.stress >= 50 ? "hue-rotate(350deg)" : "none";
 
-    const StressBar = ({ label, value, colorClass, emoji }: { label: string; value: number; colorClass: string; emoji: string }) => (
-      <div className="space-y-1">
-        <div className="flex justify-between text-[9px]" style={bodyFont}><span className="text-[var(--foreground)]">{emoji} {label}</span><span className={value > 70 ? "text-[var(--destructive)] font-bold" : "text-[var(--foreground)]"}>{value}%</span></div>
-        <div className="pixel-stress-bar"><div className={cn("pixel-stress-bar-fill", colorClass)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>
-      </div>
-    );
+    const getStressLabel = (value: number, label: string): { text: string; trend: string } => {
+      if (label === "ESTRÉS" || label === "NERVIOSISMO" || label === "HOSTILIDAD") {
+        if (value >= 85) return { text: "EXTREMO", trend: "▲▲▲" };
+        if (value >= 65) return { text: "ALTO", trend: "▲▲" };
+        if (value >= 45) return { text: "MODERADO", trend: "▲" };
+        if (value >= 25) return { text: "BAJO", trend: "—" };
+        return { text: "MÍNIMO", trend: "—" };
+      } else {
+        // CONFIANZA — inverted: high = good
+        if (value >= 75) return { text: "SEGuro", trend: "▲▲" };
+        if (value >= 55) return { text: "CALMADO", trend: "▲" };
+        if (value >= 35) return { text: "INSEGURO", trend: "▼" };
+        if (value >= 15) return { text: "NERVIOSO", trend: "▼▼" };
+        return { text: "COLAPSANDO", trend: "▼▼▼" };
+      }
+    };
+
+    const StressBar = ({ label, value, colorClass, emoji }: { label: string; value: number; colorClass: string; emoji: string }) => {
+      const { text, trend } = getStressLabel(value, label);
+      return (
+        <div className="space-y-1">
+          <div className="flex justify-between text-[9px]" style={bodyFont}>
+            <span className="text-[var(--foreground)]">{emoji} {label}</span>
+            <span className={cn(
+              value >= 75 && (label !== "CONFIANZA") ? "text-[var(--destructive)] font-bold" : "",
+              value >= 75 && label === "CONFIANZA" ? "text-[#4ec9b0] font-bold" : "",
+              value < 25 && label === "CONFIANZA" ? "text-[var(--destructive)] font-bold" : "",
+            )}>{text} <span className="text-[7px] opacity-60">{trend}</span></span>
+          </div>
+          <div className="pixel-stress-bar"><div className={cn("pixel-stress-bar-fill", colorClass)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>
+        </div>
+      );
+    };
 
     const RightTabs = () => {
       const tabList = [
@@ -1197,8 +1240,9 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-3">
             <PhaseIndicator current="playing" />
+            <span className="pixel-badge text-[8px]">PREGUNTAS: {questionsAsked}</span>
             <span className={cn("text-xs font-bold", timeRemaining <= 60 ? "text-[var(--destructive)] pixel-timer-warning" : "text-[var(--primary)]")} style={headFont}>⏱ {formatTime(timeRemaining)}</span>
-            <button onClick={enterDeliberation} className="pixel-btn-danger text-[8px] py-1 px-2">DELIBERAR</button>
+            <button onClick={enterDeliberation} className="pixel-btn-secondary text-[8px] py-1 px-2">DELIBERAR</button>
           </div>
         </header>
 
@@ -1239,7 +1283,25 @@ export default function Home() {
           {/* CENTER: Chat */}
           <section className={cn("flex-1 flex flex-col min-h-0", mobileTab !== "chat" && "hidden md:flex")}>
             <div className="flex-1 overflow-y-auto pixel-scroll p-4 space-y-3">
-              {chatMessages.length === 0 && <div className="text-center text-xs text-[var(--muted-foreground)] italic py-8">La sala está en silencio. Haz la primera pregunta...</div>}
+              {chatMessages.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-center space-y-6 pixel-fade-in">
+                  <div className={cn("flex justify-center", portraitShake && "pixel-portrait-shake")} style={{ filter: portraitTint }}>
+                    <SuspectPortrait seed={currentCase?.id?.replace("gen_", "") ?? "default"} gender={recallGender(currentCase?.id?.replace("gen_", "") ?? "default")} avatar={suspect.avatar} size="xl" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>{suspect.name}</div>
+                    <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">{suspect.role}</div>
+                  </div>
+                  <div className="pixel-frame p-3 max-w-xs">
+                    <div className="text-[10px] text-[var(--foreground)] leading-relaxed" style={bodyFont}>
+                      El sospechoso espera en la sala de interrogación. Formula tu primera pregunta para comenzar.
+                    </div>
+                  </div>
+                  <div className="text-[8px] text-[var(--muted-foreground)] opacity-50 tracking-wider">
+                    Selecciona una técnica de interrogación y haz tu pregunta
+                  </div>
+                </div>
+              )}
               {chatMessages.map((msg, i) => {
                 const isDetective = msg.senderType === "detective";
                 const isSystem = msg.senderType === "system";
