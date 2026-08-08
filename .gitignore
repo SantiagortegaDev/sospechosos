@@ -30,32 +30,34 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (never commit secrets)
 .env*
+!.env.example
 
 # vercel
 .vercel
 
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-local-*
-.claude
-.z-ai-config
-*.log
-dev.log
-dev.out.log
-test
-prompt
 
-server.log
-# Skills directory
+# logs
+*.log
+
+# ─────────── Sandbox / scaffold infra (do not commit) ───────────
+.zscripts/
+.z-ai-config
+.claude
 /skills/
-# Project-specific
-db/*.db
-db/*.db-journal
-.zscripts/dev.pid
-.zscripts/dev.log
+Caddyfile
+mini-services/
+examples/
+tests/
+upload/
+db/
+prisma/
+
+# ─────────── Project artifacts ───────────
 portal_*.json
-/sospechosos_*.png
+sospechosos_*.png
+download/
