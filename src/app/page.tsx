@@ -1951,7 +1951,7 @@ export default function Home() {
           {caseIntroStep >= 5 && evidenceItems.length > 0 && (
             <div className={cn("pixel-frame p-4 text-left transition-all duration-700 delay-300", caseIntroStep === 5 ? "opacity-100 translate-y-0" : "opacity-40")}>
               <div className="text-xs text-[var(--foreground)] tracking-wider mb-3" style={bodyFont}>EVIDENCIA ({evidenceItems.length} PIEZAS)</div>
-              <ul className="space-y-1">{evidenceItems.slice(0, 6).map((ev, i) => <li key={i} className="text-xs text-[var(--foreground)] flex gap-2" style={bodyFont}><span className={cn("shrink-0", ev.isRedHerring ? "text-[var(--destructive)]" : "text-[#4ec9b0]")}>-</span><span>{safeRender(ev.label)}{ev.isLocked ? " (BLOQUEADA)" : ""}</span></li>)}</ul>
+              <ul className="space-y-1">{evidenceItems.slice(0, 6).map((ev, i) => <li key={i} className="text-xs text-[var(--foreground)] flex gap-2" style={bodyFont}><span className={cn("shrink-0", ev.isRedHerring ? "text-[var(--destructive)]" : "text-[#4ec9b0]")}>{ev.isLocked ? "🔒" : "▸"}</span><span>{safeRender(ev.label) || "Evidencia"}</span></li>)}</ul>
             </div>
           )}
           {caseIntroStep >= totalSteps - 1 ? (
@@ -2111,7 +2111,7 @@ export default function Home() {
                 className={cn(
                   "px-2.5 py-2 text-[12px] tracking-wider transition-all cursor-pointer border-b-2",
                   rightTab === tab.key
-                    ? "text-[var(--amber)] border-[var(--amber)] bg-[var(--amber)]/15 font-bold"
+                    ? "text-[var(--primary)] border-[var(--primary)] bg-[var(--primary)]/12 font-bold"
                     : "text-[var(--muted-foreground)] border-transparent hover:text-[var(--foreground)] hover:bg-[var(--accent)]/50"
                 )}
                 style={bodyFont}
@@ -2170,13 +2170,13 @@ export default function Home() {
                 {evidenceItems.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">Sin evidencia</div> : (
                   <div className="space-y-2">
                     {evidenceItems.map((ev) => (
-                      <div key={ev.id} className={cn("pixel-frame p-2 transition-all cursor-pointer hover:translate-y-[-2px]", ev.isLocked && "opacity-40", selectedEvidence?.id === ev.id && "pixel-frame-active")} onClick={() => { if (!ev.isLocked) { SFX.soundClick(); setSelectedEvidence(ev === selectedEvidence ? null : ev); } }}>
+                      <div key={ev.id} className={cn("pixel-frame p-2 transition-all cursor-pointer hover:translate-y-[-2px]", ev.isLocked && "opacity-50", selectedEvidence?.id === ev.id && "pixel-frame-active")} onClick={() => { if (!ev.isLocked) { SFX.soundClick(); setSelectedEvidence(ev === selectedEvidence ? null : ev); } }}>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm">{ev.isRedHerring ? "🔴" : ev.isLocked ? "[LOCK]" : "[DOC]"}</span>
-                          <span className="text-[13px] font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
+                          <span className="text-sm shrink-0">{ev.isRedHerring && !ev.isLocked ? "🔴" : ev.isLocked ? "🔒" : "📄"}</span>
+                          <span className="text-[13px] font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label) || "Evidencia"}</span>
                         </div>
                         {!ev.isLocked && <div className="text-[13px] text-[var(--muted-foreground)] mt-1">{safeRender(ev.description)}</div>}
-                        {ev.isLocked && <div className="text-[10px] text-[var(--muted-foreground)] mt-1 italic">Bloqueada — investiga más para desbloquear</div>}
+                        {ev.isLocked && <div className="text-[10px] text-[var(--primary)]/60 mt-1 italic">Pregúntale sobre este tema para revelarla</div>}
                       </div>
                     ))}
                   </div>
@@ -2393,9 +2393,9 @@ export default function Home() {
             </div>
           </aside>
 
-          {/* CENTER: Chat — constrained width so messages don't stretch */}
+          {/* CENTER: Chat — fills available width, messages anchor to bottom */}
           <section className={cn("flex-1 flex flex-col min-h-0 bg-[var(--background)]", mobileTab !== "chat" && "hidden md:flex")}>
-            <div className="flex-1 overflow-y-auto pixel-scroll-hide p-3 space-y-2 pixel-chat-compact max-w-3xl mx-auto w-full">
+            <div className="flex-1 overflow-y-auto pixel-scroll-hide p-3 flex flex-col justify-end gap-2 pixel-chat-compact">
               {chatMessages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center space-y-3 pixel-fade-in py-8">
                   <div className="text-3xl mb-2 opacity-50">{safeRender(suspect.avatar)}</div>
@@ -2403,6 +2403,7 @@ export default function Home() {
                   <div className="text-xs text-[var(--primary)]">Formula tu primera pregunta para comenzar.</div>
                 </div>
               )}
+              <div className="space-y-2">
               {chatMessages.map((msg, i) => {
                 const isDetective = msg.senderType === "detective";
                 const isSystem = msg.senderType === "system";
@@ -2444,6 +2445,7 @@ export default function Home() {
                 </div>
               )}
               <div ref={chatEndRef} />
+              </div>
             </div>
             {/* PROPOSAL REVIEW UI — shown when the other detective proposed a question */}
             {turnState.status === "reviewing" && (
@@ -2586,7 +2588,7 @@ export default function Home() {
                 unlockedEvidence.map((ev) => (
                   <div key={ev.id} className={cn("pixel-frame p-2", ev.isRedHerring && "border-l-2 border-[var(--destructive)]")}>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm">{ev.isRedHerring ? "🔴" : "[DOC]"}</span>
+                      <span className="text-sm">{ev.isRedHerring ? "🔴" : "📄"}</span>
                       <span className="text-[13px] font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
                     </div>
                     <p className="text-[12px] text-[var(--muted-foreground)] leading-relaxed">{safeRender(ev.description)}</p>
@@ -2743,7 +2745,7 @@ export default function Home() {
                 <button onClick={() => { SFX.soundClick(); setVoteChoice("innocent"); }} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "innocent" ? "border-[#4ec9b0] bg-[#4ec9b0]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[#4ec9b0]")}><div className="text-2xl">🕊</div><div className="text-sm font-bold tracking-widest mt-2 text-[#4ec9b0]" style={headFont}>INOCENTE</div><div className="text-[12px] text-[var(--muted-foreground)] mt-1">Queda libre</div></button>
               </div>
               <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">RAZÓN DE TU VOTO</label><textarea value={voteReason} onChange={(e) => setVoteReason(e.target.value)} className="pixel-input w-full min-h-[80px] resize-none text-xs" placeholder="¿Por qué? Basa tu respuesta en la evidencia..." /></div>
-              <div className="text-center pixel-scroll-arrow text-[var(--amber)] text-lg">▼</div>
+              <div className="text-center pixel-scroll-arrow text-[var(--primary)] text-lg">▼</div>
               <button onClick={() => { SFX.soundVerdict(); handleSubmitVote(); }} disabled={!voteChoice} className={cn("w-full py-3 text-xs tracking-widest font-bold cursor-pointer", voteChoice ? (voteChoice === "guilty" ? "pixel-btn-danger" : "pixel-btn") : "pixel-btn-secondary opacity-30")} style={headFont}>REGISTRAR VOTO</button>
             </div>
           )}
