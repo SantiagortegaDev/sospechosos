@@ -257,8 +257,17 @@ export default function Home() {
   const [ending, setEnding] = useState<EndingResult | null>(null);
   const [shakeKey, setShakeKey] = useState(0);
 
-  /* Revelation */
-  const [revelationText, setRevelationText] = useState("");
+  /* Revelation — structured truth object rendered as separate cards. */
+  const [revelation, setRevelation] = useState<{
+    suspectName: string;
+    culpability: "guilty" | "innocent" | "accomplice" | "witness";
+    truth: string;
+    alibiClaimed?: string;
+    alibiActual?: string;
+    alibiWitnesses?: string[];
+    evidence: Array<{ label: string; description: string; isRedHerring: boolean }>;
+    timeline: Array<{ time: string; event: string }>;
+  } | null>(null);
   const [revelationLoading, setRevelationLoading] = useState(false);
 
   /* Achievements */
@@ -924,7 +933,7 @@ export default function Home() {
     setChatMessages([]); setDetectiveMessages([]); setVotes([]); setHasVoted(false);
     setVerdict(null); setEnding(null); setUnlockedAchievements([]);
     setTimeRemaining(0); setTotalTime(0); setEvidenceItems([]);
-    setRevelationText("");
+    setRevelation(null);
     // Reset welcome screen state so the flash animation doesn't get stuck
     // and the mount animation replays cleanly.
     setWelcomeFlash(false);
@@ -946,38 +955,49 @@ export default function Home() {
     if (!currentCase) return;
     setRevelationLoading(true);
     try {
-      // Use the stored raw generated case to build the revelation text.
+      // Use the stored raw generated case to build the structured truth object.
       // Do NOT re-call /api/generate-case — the in-memory cache may be lost
       // on serverless cold starts, and temperature=0.9 means we'd get a
       // completely different case.
       if (generatedCaseRaw) {
         const s = generatedCaseRaw.suspect;
-        let rev = `=== LA VERDAD COMPLETA ===\n\n`;
-        rev += `Sospechoso: ${s.name}\n`;
-        rev += `Responsabilidad: ${s.culpability === "guilty" ? "CULPABLE" : s.culpability === "innocent" ? "INOCENTE" : s.culpability === "accomplice" ? "COMPLICE" : "TESTIGO"}\n\n`;
-        rev += `LO QUE REALMENTE SUCEDIO:\n${s.truth}\n\n`;
-        if (s.alibi) { rev += `COARTADA (MENTIRA): ${s.alibi.claimed}\nCOARTADA (REAL): ${s.alibi.actual}\n\n`; }
-        if (generatedCaseRaw.evidence) {
-          rev += `EVIDENCIA:\n`;
-          for (const ev of generatedCaseRaw.evidence) { rev += `  ${ev.isRedHerring ? "[FALSA]" : "[REAL]"}: ${ev.label} - ${ev.description}\n`; }
-          rev += "\n";
-        }
-        if (generatedCaseRaw.timeline) {
-          rev += `LINEA TEMPORAL REAL:\n`;
-          for (const t of generatedCaseRaw.timeline) { rev += `  [${t.time}] ${t.event}\n`; }
-        }
-        setRevelationText(rev);
+        setRevelation({
+          suspectName: safeRender(s.name),
+          culpability: s.culpability,
+          truth: safeRender(s.truth),
+          alibiClaimed: s.alibi ? safeRender(s.alibi.claimed) : undefined,
+          alibiActual: s.alibi ? safeRender(s.alibi.actual) : undefined,
+          alibiWitnesses: s.alibi?.witnesses?.map(w => safeRender(w)) ?? [],
+          evidence: (generatedCaseRaw.evidence ?? []).map(ev => ({
+            label: safeRender(ev.label),
+            description: safeRender(ev.description),
+            isRedHerring: !!ev.isRedHerring,
+          })),
+          timeline: (generatedCaseRaw.timeline ?? []).map(t => ({
+            time: safeRender(t.time),
+            event: safeRender(t.event),
+          })),
+        });
       } else {
-        // Fallback for hardcoded cases that have no generatedCaseRaw
+        // Fallback for hardcoded cases that have no generatedCaseRaw.
         const s = currentCase.suspect;
-        let rev = `=== LA VERDAD COMPLETA ===\n\n`;
-        rev += `Sospechoso: ${s.name}\n`;
-        rev += `Responsabilidad: ${s.isGuilty ? "CULPABLE" : "INOCENTE"}\n\n`;
-        if (currentCase.briefing) rev += `CASO: ${currentCase.briefing}\n\n`;
-        setRevelationText(rev);
+        setRevelation({
+          suspectName: safeRender(s.name),
+          culpability: s.isGuilty ? "guilty" : "innocent",
+          truth: currentCase.briefing ? safeRender(currentCase.briefing) : "La verdad no pudo ser recuperada.",
+          evidence: [],
+          timeline: [],
+        });
       }
-    } catch { setRevelationText("No se pudo generar la revelacion."); }
-    finally { setRevelationLoading(false); }
+    } catch {
+      setRevelation({
+        suspectName: safeRender(currentCase.suspect.name),
+        culpability: currentCase.suspect.isGuilty ? "guilty" : "innocent",
+        truth: "No se pudo generar la revelación.",
+        evidence: [],
+        timeline: [],
+      });
+    } finally { setRevelationLoading(false); }
   }, [currentCase, generatedCaseRaw]);
 
   /* ═══ SHARED UI ═══ */
@@ -1984,14 +2004,39 @@ export default function Home() {
           ) : verdict ? (
             <>
               <div className="text-xs tracking-[0.3em] text-[var(--muted-foreground)]">JUEZ VALERIA CRUZ · SALA DE JUSTICIA</div>
+
+              {/* Decision de los detectives — grande y claro */}
               <div className="pixel-frame p-8" key={shakeKey}>
+                <div className="text-xs text-[var(--muted-foreground)] tracking-wider mb-3">VEREDICTO DE LOS DETECTIVES</div>
                 <div className="text-3xl mb-4">{verdict.decision === "imprisoned" ? "[CHAIN]" : "[UNLOCK]"}</div>
-                <div className={cn("text-xl md:text-2xl font-bold tracking-widest", verdict.decision === "imprisoned" ? "text-[var(--destructive)]" : "text-[#4ec9b0]")} style={headFont}>{verdict.decision === "imprisoned" ? "ENCARCELADO" : "LIBRE"}</div>
-                <div className="text-xs text-[var(--muted-foreground)] mt-2 tracking-wider">{safeRender(currentCase?.suspect.name)} {verdict.decision === "imprisoned" ? "ha sido encontrado culpable" : "ha sido absuelto"}</div>
+                <div className={cn("text-2xl md:text-3xl font-bold tracking-widest", verdict.decision === "imprisoned" ? "text-[var(--destructive)]" : "text-[#4ec9b0]")} style={headFont}>{verdict.decision === "imprisoned" ? "ENCARCELADO" : "EN LIBERTAD"}</div>
+                <div className="text-xs text-[var(--muted-foreground)] mt-3 tracking-wider">{safeRender(currentCase?.suspect.name)} {verdict.decision === "imprisoned" ? "fue encontrado CULPABLE por los detectives" : "fue absuelto y puesto en LIBERTAD por los detectives"}</div>
               </div>
-              <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--primary)] mb-2" style={headFont}>RAZONAMIENTO DE LA JUEZA</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(verdict.judgeReasoning)}"</p></div>
-              <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--muted-foreground)] mb-2" style={headFont}>COMENTARIO</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(verdict.judgesComment)}"</p></div>
-              <button onClick={() => { setPhase("revelation"); generateRevelation(); }} className="pixel-btn py-3 px-8 mt-4" style={headFont}>VER LA VERDAD</button>
+
+              {/* Recuento de votos — compacto */}
+              <div className="pixel-frame p-4">
+                <div className="text-xs text-[var(--muted-foreground)] mb-3 tracking-wider">RECUENTO DE VOTOS</div>
+                <div className="flex justify-center gap-10">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-[var(--destructive)]" style={headFont}>{verdict.guiltyVotes}</div>
+                    <div className="text-[12px] text-[var(--muted-foreground)] tracking-wider">CULPABLE</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-[#4ec9b0]" style={headFont}>{verdict.innocentVotes}</div>
+                    <div className="text-[12px] text-[var(--muted-foreground)] tracking-wider">INOCENTE</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Razonamiento de la jueza */}
+              <div className="pixel-frame p-4 text-left">
+                <div className="text-xs text-[var(--primary)] mb-2 tracking-wider" style={headFont}>⚖ RAZONAMIENTO DE LA JUEZA</div>
+                <p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(verdict.judgeReasoning)}"</p>
+                <div className="text-[11px] text-[var(--muted-foreground)] leading-relaxed italic mt-3 pt-2 border-t border-[var(--border)]">"{safeRender(verdict.judgesComment)}"</div>
+              </div>
+
+              <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider animate-pulse">¿ACERTARON O SE EQUIVOCARON? DESCÚBRELO ↓</div>
+              <button onClick={() => { setPhase("revelation"); generateRevelation(); }} className="pixel-btn py-3 px-8" style={headFont}>REVELAR LA VERDAD</button>
             </>
           ) : (
             <div className="pixel-frame p-6"><div className="text-xs text-[var(--destructive)]">Error: No se pudo obtener el veredicto.</div><button onClick={() => setPhase("results")} className="pixel-btn mt-4 px-4 py-2 text-xs">CONTINUAR</button></div>
@@ -2003,19 +2048,131 @@ export default function Home() {
 
   /* ═══ RENDER: REVELATION ═══ */
   if (phase === "revelation") {
+    // Map culpability enum → human-readable Spanish labels + subtitle.
+    const culpabilityLabels: Record<string, { label: string; subtitle: string; color: string }> = {
+      guilty:    { label: "CULPABLE",  subtitle: "Cometió el crimen.", color: "text-[var(--destructive)]" },
+      innocent:  { label: "INOCENTE",  subtitle: "No tuvo nada que ver con el crimen.", color: "text-[#4ec9b0]" },
+      accomplice:{ label: "CÓMPLICE",  subtitle: "Ayudó al verdadero culpable, pero no lo planeó.", color: "text-[#fbbf24]" },
+      witness:   { label: "TESTIGO",   subtitle: "Solo vio o escuchó algo. No participó.", color: "text-[#60a5fa]" },
+    };
+    const culp = revelation ? culpabilityLabels[revelation.culpability] ?? culpabilityLabels.innocent : culpabilityLabels.innocent;
+
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4" style={bodyFont}>
         {AchievementOverlay}
-        <div className="max-w-2xl w-full space-y-6 text-center">
+        <div className="max-w-2xl w-full space-y-5 text-center">
           <div className="pixel-header"><span>LA VERDAD COMPLETA</span></div>
+
           {revelationLoading ? (
             <div className="pixel-frame p-8"><div className="text-sm text-[var(--primary)] animate-pulse tracking-widest">REVELANDO LA VERDAD...</div></div>
+          ) : revelation && verdict ? (
+            <>
+              {/* BANNER GRANDE — acertaron o se equivocaron */}
+              <div className={cn("pixel-frame p-6 border-2", verdict.majorityCorrect ? "border-[#4ec9b0] bg-[#4ec9b0]/5" : "border-[var(--destructive)] bg-[var(--destructive)]/5")}>
+                <div className="text-3xl mb-2">{verdict.majorityCorrect ? "✓" : "✗"}</div>
+                <div className={cn("text-2xl md:text-3xl font-bold tracking-widest", verdict.majorityCorrect ? "text-[#4ec9b0]" : "text-[var(--destructive)]")} style={headFont}>
+                  {verdict.majorityCorrect ? "ACERTARON" : "SE EQUIVOCARON"}
+                </div>
+                <div className="text-xs text-[var(--muted-foreground)] mt-2 tracking-wider">
+                  {verdict.majorityCorrect
+                    ? "Los detectives llegaron a la conclusión correcta."
+                    : "Los detectives tomaron la decisión equivocada."}
+                </div>
+              </div>
+
+              {/* Responsabilidad real del sospechoso */}
+              <div className="pixel-frame p-5">
+                <div className="text-xs text-[var(--muted-foreground)] tracking-wider mb-3">REALIDAD SOBRE {safeRender(revelation.suspectName).toUpperCase()}</div>
+                <div className={cn("text-xl md:text-2xl font-bold tracking-widest", culp.color)} style={headFont}>{culp.label}</div>
+                <div className="text-xs text-[var(--muted-foreground)] mt-2 italic">{culp.subtitle}</div>
+              </div>
+
+              {/* Comparación: decisión vs realidad */}
+              <div className="pixel-frame p-4">
+                <div className="text-xs text-[var(--muted-foreground)] tracking-wider mb-3">RESUMEN</div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="text-left">
+                    <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider">DECISIÓN</div>
+                    <div className={cn("font-bold tracking-wider mt-1", verdict.decision === "imprisoned" ? "text-[var(--destructive)]" : "text-[#4ec9b0]")} style={headFont}>
+                      {verdict.decision === "imprisoned" ? "ENCARCELADO" : "LIBRE"}
+                    </div>
+                  </div>
+                  <div className="text-left">
+                    <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider">REALIDAD</div>
+                    <div className={cn("font-bold tracking-wider mt-1", culp.color)} style={headFont}>{culp.label}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* La verdad — texto largo */}
+              <div className="pixel-frame p-5 text-left">
+                <div className="text-xs text-[var(--primary)] mb-2 tracking-wider" style={headFont}>📜 LO QUE REALMENTE SUCEDIÓ</div>
+                <p className="text-sm text-[var(--foreground)] leading-relaxed">{safeRender(revelation.truth)}</p>
+              </div>
+
+              {/* Coartada */}
+              {revelation.alibiClaimed && revelation.alibiActual && (
+                <div className="pixel-frame p-5 text-left">
+                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>🎭 COARTADA</div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider mb-1">LO QUE DECLARÓ</div>
+                      <p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(revelation.alibiClaimed)}"</p>
+                    </div>
+                    <div className="border-t border-[var(--border)] pt-3">
+                      <div className="text-[11px] text-[var(--destructive)] tracking-wider mb-1">LO QUE REALMENTE HACÍA</div>
+                      <p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(revelation.alibiActual)}"</p>
+                    </div>
+                    {revelation.alibiWitnesses && revelation.alibiWitnesses.length > 0 && (
+                      <div className="border-t border-[var(--border)] pt-3">
+                        <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider mb-1">POSIBLES TESTIGOS</div>
+                        <p className="text-xs text-[var(--foreground)] leading-relaxed">{revelation.alibiWitnesses.join(", ")}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Evidencia */}
+              {revelation.evidence.length > 0 && (
+                <div className="pixel-frame p-5 text-left">
+                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>🔍 EVIDENCIA ({revelation.evidence.length})</div>
+                  <div className="space-y-2">
+                    {revelation.evidence.map((ev, i) => (
+                      <div key={i} className={cn("p-2 border-l-2", ev.isRedHerring ? "border-[var(--destructive)] bg-[var(--destructive)]/5" : "border-[#4ec9b0] bg-[#4ec9b0]/5")}>
+                        <div className="flex items-baseline gap-2">
+                          <span className={cn("text-[10px] font-bold tracking-wider px-1.5 py-0.5", ev.isRedHerring ? "bg-[var(--destructive)]/20 text-[var(--destructive)]" : "bg-[#4ec9b0]/20 text-[#4ec9b0]")}>
+                            {ev.isRedHerring ? "PISTA FALSA" : "REAL"}
+                          </span>
+                          <span className="text-xs font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
+                        </div>
+                        <p className="text-[12px] text-[var(--muted-foreground)] leading-relaxed mt-1">{safeRender(ev.description)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Timeline */}
+              {revelation.timeline.length > 0 && (
+                <div className="pixel-frame p-5 text-left">
+                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>⏰ LÍNEA TEMPORAL REAL</div>
+                  <div className="space-y-1.5">
+                    {revelation.timeline.map((t, i) => (
+                      <div key={i} className="flex gap-3 text-xs">
+                        <span className="text-[var(--primary)] font-bold tracking-wider shrink-0 min-w-[55px]">{safeRender(t.time)}</span>
+                        <span className="text-[var(--foreground)] leading-relaxed">{safeRender(t.event)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button onClick={() => setPhase("results")} className="pixel-btn py-3 px-8" style={headFont}>VER RESULTADOS</button>
+            </>
           ) : (
-            <div className="pixel-frame p-6 text-left max-h-[60vh] overflow-y-auto pixel-scroll">
-              <pre className="text-xs text-[var(--foreground)] whitespace-pre-wrap leading-relaxed font-[var(--font-pixel-body)]">{revelationText}</pre>
-            </div>
+            <div className="pixel-frame p-6"><div className="text-xs text-[var(--destructive)]">No se pudo generar la revelación.</div></div>
           )}
-          <button onClick={() => setPhase("results")} className="pixel-btn py-3 px-8" style={headFont}>VER RESULTADOS</button>
         </div>
       </main>
     );
@@ -2048,23 +2205,14 @@ export default function Home() {
           <div className="border-t-2 border-[var(--border)]" />
 
           <div className="pixel-frame p-4">
-            <div className="text-xs text-[var(--primary)] mb-3" style={headFont}>🏆 LOGROS ({unlockedAchievements.length})</div>
+            <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>🏆 LOGROS ({unlockedAchievements.length})</div>
             {unlockedAchievements.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4">Sin logros esta partida.</div> : (
               <div className="grid gap-2">{unlockedAchievements.map((ach) => (<div key={ach.id} className="pixel-frame p-2 flex items-center gap-3 text-left pixel-evidence-flash"><span className="text-xl">{ach.icon}</span><div><div className="text-xs font-bold text-[var(--primary)] tracking-wider">{ach.name}</div><div className="text-[13px] text-[var(--muted-foreground)]">{ach.description}</div></div></div>))}</div>
             )}
           </div>
 
-          {verdict && (
-            <div className="pixel-frame p-4">
-              <div className="text-xs text-[var(--muted-foreground)] mb-2">RESUMEN DE VOTACIÓN</div>
-              <div className="flex justify-center gap-8"><div className="text-center"><div className="text-lg font-bold text-[var(--destructive)]">{verdict.guiltyVotes}</div><div className="text-[12px] text-[var(--muted-foreground)]">CULPABLE</div></div><div className="text-center"><div className="text-lg font-bold text-[#4ec9b0]">{verdict.innocentVotes}</div><div className="text-[12px] text-[var(--muted-foreground)]">INOCENTE</div></div></div>
-              <div className="text-[12px] text-[var(--muted-foreground)] mt-2">{verdict.suspectIsGuilty ? "La realidad: el sospechoso SÍ era culpable" : "La realidad: el sospechoso NO era culpable"}</div>
-              <div className={cn("text-xs font-bold mt-1", verdict.majorityCorrect ? "text-[#4ec9b0]" : "text-[var(--destructive)]")}>{verdict.majorityCorrect ? "✓ Los detectives acertaron" : "✗ Los detectives se equivocaron"}</div>
-            </div>
-          )}
-
           <div className="pixel-frame p-4">
-            <div className="text-xs text-[var(--muted-foreground)] mb-2">ESTADÍSTICAS</div>
+            <div className="text-xs text-[var(--muted-foreground)] mb-2 tracking-wider">ESTADÍSTICAS</div>
             <div className="flex justify-center gap-6 text-xs">
               <div className="text-center"><div className="text-sm font-bold text-[var(--primary)]">{questionsAsked}</div><div className="text-[12px] text-[var(--muted-foreground)]">PREGUNTAS</div></div>
               <div className="text-center"><div className="text-sm font-bold text-[var(--destructive)]">{maxStress}%</div><div className="text-[12px] text-[var(--muted-foreground)]">ESTRÉS MAX</div></div>
