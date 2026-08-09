@@ -658,6 +658,19 @@ export default function Home() {
     if (votes.length >= requiredVotes && !allVotesIn) { setAllVotesIn(true); setTimeout(() => callJudge(), 1500); }
   }, [votes.length, allVotesIn, callJudge, requiredVotes]);
 
+  /* Case intro auto-advance timer.
+   * MUST live at the top level of the component — placing it inside the
+   * `if (phase === "case_intro")` block violates the Rules of Hooks and
+   * triggers React error #310 ("Rendered more hooks than during the
+   * previous render") when navigating into / out of the case_intro phase. */
+  const CASE_INTRO_TOTAL_STEPS = 7;
+  useEffect(() => {
+    if (phase !== "case_intro") return;
+    if (caseIntroStep >= CASE_INTRO_TOTAL_STEPS - 1) return;
+    const timer = setTimeout(() => setCaseIntroStep((p) => p + 1), 2200);
+    return () => clearTimeout(timer);
+  }, [phase, caseIntroStep]);
+
   /* ═══ HANDLERS ═══ */
 
   const closeTutorial = () => { localStorage.setItem(TUTORIAL_KEY, "1"); setShowTutorial(false); SFX.soundClick(); };
@@ -1359,14 +1372,7 @@ export default function Home() {
 
   /* ═══ RENDER: CASE_INTRO ═══ */
   if (phase === "case_intro" && currentCase) {
-    const c = currentCase; const s = c.suspect; const totalSteps = 7;
-    // Auto-advance timer
-    useEffect(() => {
-      if (caseIntroStep < totalSteps - 1) {
-        const timer = setTimeout(() => setCaseIntroStep(p => p + 1), 2200);
-        return () => clearTimeout(timer);
-      }
-    }, [caseIntroStep]);
+    const c = currentCase; const s = c.suspect; const totalSteps = CASE_INTRO_TOTAL_STEPS;
 
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-6 select-none pixel-fade-in cursor-pointer"
