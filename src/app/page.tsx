@@ -611,12 +611,31 @@ export default function Home() {
     const newTurn: ConversationTurn = { role: "detective", text, detectiveName: session.username, timestamp: Date.now() };
     try { await sendGame({ type: "detective.question", content: qMsg }); } catch { /* ok */ }
 
-    // Check for evidence unlocks
+    // Check for evidence unlocks — two strategies:
+    // 1. unlockTopic regex (if the case generator provided one)
+    // 2. FALLBACK: keyword match on the evidence label + description.
+    //    This guarantees evidence is always unlockable even if the LLM
+    //    generated a bad unlockTopic regex that never matches.
     const qLower = text.toLowerCase();
     let unlockedSomething = false;
     setEvidenceItems((prev) => prev.map(ev => {
-      if (ev.isLocked && ev.unlockTopic) {
+      if (!ev.isLocked) return ev;
+      // Strategy 1: explicit unlockTopic regex.
+      if (ev.unlockTopic) {
         try { if (new RegExp(ev.unlockTopic, "i").test(qLower)) { unlockedSomething = true; return { ...ev, isLocked: false }; } } catch { /* invalid regex */ }
+      }
+      // Strategy 2: fallback — extract keywords from label + description
+      // and check if the question contains any of them.
+      const keywordSource = `${ev.label} ${ev.description}`.toLowerCase();
+      const keywords = keywordSource
+        .split(/[^a-záéíóúñ]+/)
+        .filter(w => w.length >= 4 && !["para","como","cuando","donde","porque","tiene","tiene","esto","esos","este","essa","essa","con","sin","sobre","tras","desde","hasta","entre","para"].includes(w));
+      const uniqueKeywords = [...new Set(keywords)].slice(0, 8); // max 8 keywords
+      for (const kw of uniqueKeywords) {
+        if (qLower.includes(kw)) {
+          unlockedSomething = true;
+          return { ...ev, isLocked: false };
+        }
       }
       return ev;
     }));
@@ -1256,17 +1275,29 @@ export default function Home() {
                 <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">Sin evidencia disponible</div>
               ) : (
                 <div className="grid gap-2">
-                  {evidenceItems.map((ev) => (
-                    <div key={ev.id} className={cn("pixel-frame p-3 transition-all", ev.isLocked && "opacity-40")}>
+                  {evidenceItems.map((ev) => {
+                    // Build a hint from the label keywords so detectives
+                    // know what to ask about to unlock this evidence.
+                    const hintKeywords = ev.label
+                      .toLowerCase()
+                      .split(/[^a-záéíóúñ]+/)
+                      .filter(w => w.length >= 4)
+                      .slice(0, 3);
+                    const hint = hintKeywords.length > 0
+                      ? `Pregunta sobre: ${hintKeywords.join(", ")}`
+                      : "Pregunta sobre el tema relacionado";
+                    return (
+                    <div key={ev.id} className={cn("pixel-frame p-3 transition-all", ev.isLocked && "opacity-60")}>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm">{ev.isRedHerring ? "🔴" : ev.isLocked ? "[LOCK]" : "[DOC]"}</span>
+                        <span className="text-sm">{ev.isRedHerring ? "🔴" : ev.isLocked ? "🔒" : "📄"}</span>
                         <span className="text-xs font-bold text-[var(--foreground)] tracking-wider">{ev.label}</span>
                         {ev.isRedHerring && <span className="pixel-badge danger text-[8px]">PISTA FALSA</span>}
                       </div>
                       {!ev.isLocked && <div className="text-xs text-[var(--muted-foreground)] mt-1">{ev.description}</div>}
-                      {ev.isLocked && <div className="text-xs text-[var(--muted-foreground)] mt-1 italic">Bloqueada — pregunta sobre el tema relacionado para desbloquear</div>}
+                      {ev.isLocked && <div className="text-[10px] text-[var(--primary)]/70 mt-1 italic">💡 {hint}</div>}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

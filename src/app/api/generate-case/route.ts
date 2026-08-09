@@ -47,7 +47,7 @@ const SYSTEM_PROMPT = `Generas casos de interrogación noir en español. Devuelv
     }
   },
   "evidence": [
-    {"id":"ev_1","label":"TAG","description":"descripción","isRedHerring":false,"unlockTopic":"regex del tema que desbloquea esta evidencia"}
+    {"id":"ev_1","label":"TAG","description":"descripción","isRedHerring":false,"unlockTopic":"regex AMPLO del tema, ej: 'coartada|dónde estabas|ubicación|noche|día' para evidencia de ubicación"}
   ],
   "timeline": [
     {"time":"18:00","event":"descripción del evento","isPublic":true}
@@ -66,7 +66,7 @@ REGLAS:
 - El sospechoso debe poder ser guilty, innocent, accomplice o witness (varía).
 - difficulty: "facil" si el culpable es obvio y las mentiras son simples, "medio" si requiere pensar, "dificil" si las mentiras son sofisticadas y hay pistas falsas.
 - El alibi debe ser detallado: el sospechoso lo menciona voluntariamente pero puede tener agujeros.
-- Las evidencias con unlockTopic se desbloquean cuando el detective pregunta sobre ese tema.
+- Las evidencias con unlockTopic se desbloquean cuando el detective pregunta sobre ese tema. Los unlockTopic DEBEN ser regex AMPLOS con múltiples sinónimos separados por |, ej: 'coartada|dónde estabas|ubicación|noche|día|estabas|encontrabas'. NUNCA uses patrones de una sola palabra específica que el detective no adivinaría.
 - Las evidencias con isRedHerring:true parecen relevantes pero llevan a conclusiones incorrectas.
 
 La SEMILLA es: "${"%SEED%"}". Úsala como inspiración creativa. Misma semilla = mismo caso. Devuelve SOLO el JSON.`;
