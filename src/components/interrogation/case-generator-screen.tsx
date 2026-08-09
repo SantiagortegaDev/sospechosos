@@ -21,7 +21,7 @@
  * "GENERAR NUEVO CASO" to reroll, or type a specific seed.
  */
 
-import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { GeneratedCase } from "@/lib/ai/generated-case";
 import { randomSeedString } from "@/lib/ai/rng";
 import { cn } from "@/lib/utils";
@@ -41,9 +41,8 @@ const STEPS = [
   { label: "Caso listo!", duration: 800 },
 ];
 
-export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack }: Props) {
+export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack: _onBack }: Props) {
   const [seed, setSeed] = useState(initialSeed || randomSeedString());
-  const [seedInput, setSeedInput] = useState("");
   const [stepIdx, setStepIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -152,26 +151,13 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack }: Props)
     void generate(next);
   }
 
-  function useTypedSeed(e: FormEvent) {
-    e.preventDefault();
-    if (loadingRef.current) return;
-    const s = seedInput.trim();
-    if (!s) return;
-    setSeed(s);
-    void generate(s);
-    setSeedInput("");
-  }
-
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 relative pixel-fade-in">
       <div className="w-full max-w-xl">
         {/* Seed display */}
-        <div className="text-center mb-6 pixel-slide-in-up">
-          <div className="text-[10px] tracking-[0.4em] text-[var(--muted-foreground)] mb-2">
-            SEMILLA DEL CASO
-          </div>
-          <div className="text-3xl tracking-[0.2em] text-[#7dd3fc] font-bold pixel-text-glow">
-            {seed}
+        <div className="text-center mb-4 pixel-slide-in-up">
+          <div className="text-xs tracking-[0.4em] text-[var(--muted-foreground)]">
+            GENERANDO CASO... // SEMILLA: {seed}
           </div>
         </div>
 
@@ -202,7 +188,7 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack }: Props)
                 >
                   <span
                     className={cn(
-                      "w-4 h-4 flex items-center justify-center text-[10px] transition-all duration-200",
+                      "w-4 h-4 flex items-center justify-center text-[13px] transition-all duration-200",
                       isDone
                         ? "text-[#4ec9b0]"
                         : isCurrent
@@ -252,43 +238,9 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack }: Props)
             >
               {loading ? "GENERANDO..." : "GENERAR NUEVO CASO"}
             </button>
-
-            <form onSubmit={useTypedSeed} className="flex gap-2">
-              <input
-                value={seedInput}
-                onChange={(e) => setSeedInput(e.target.value)}
-                placeholder="Escribe una semilla..."
-                disabled={loading}
-                className="pixel-input flex-1 text-xs"
-                maxLength={32}
-              />
-              <button
-                type="submit"
-                disabled={loading || !seedInput.trim()}
-                className="pixel-btn-secondary text-xs px-4"
-              >
-                USAR
-              </button>
-            </form>
           </div>
-        </div>
-
-        <div className="text-center mt-4">
-          <button
-            onClick={onBack}
-            disabled={loading}
-            className="text-[10px] text-[var(--muted-foreground)] hover:text-[#7dd3fc] tracking-widest transition-colors"
-          >
-            VOLVER
-          </button>
-        </div>
-
-        <div className="text-center mt-3 text-[9px] text-[var(--muted-foreground)]/40 tracking-widest">
-          MISMA SEMILLA = MISMO CASO
         </div>
       </div>
     </main>
   );
 }
-
-

@@ -694,11 +694,11 @@
 
 @keyframes pixel-screen-flash {
   0% { opacity: 0; }
-  30% { opacity: 1; }
+  15% { opacity: 0.9; }
   100% { opacity: 0; }
 }
 .pixel-screen-flash {
-  animation: pixel-screen-flash 0.8s steps(3) forwards;
+  animation: pixel-screen-flash 0.5s ease-out forwards;
 }
 
 @keyframes pixel-vote-glow {
@@ -951,7 +951,7 @@
 
 /* ═══ Compact Chat Styles ═══ */
 .pixel-chat-compact {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   line-height: 1.5;
   gap: 0.5rem;
 }
@@ -959,12 +959,12 @@
   padding: 0.5rem 0.65rem;
   border-width: 1px;
 }
-.pixel-chat-compact [class*="text-9px"],
-.pixel-chat-compact [class*="text-\\[9px\\]"] {
-  font-size: 0.65rem;
+.pixel-chat-compact [class*="text-12px"],
+.pixel-chat-compact [class*="text-\\[12px\\]"] {
+  font-size: 0.72rem;
 }
 .pixel-chat-compact [class*="text-xs"] {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 .pixel-chat-compact .max-w-\\[80\\%\\] {
   max-width: 75%;
