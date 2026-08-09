@@ -469,6 +469,64 @@ export default function Home() {
     return () => { if (nervousnessRef.current) clearInterval(nervousnessRef.current); };
   }, [phase]);
 
+  /* Stress / confidence / hostility micro-fluctuation during playing.
+   * Between questions, the suspect's vitals "breathe" — small ±3 wobbles
+   * every 8s, with a slow drift back toward baseline. This makes the bars
+   * feel alive instead of frozen between questions. */
+  const vitalsRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const baselineRef = useRef<StressState>({ stress: 30, confidence: 70, hostility: 20 });
+  useEffect(() => {
+    if (phase !== "playing") {
+      if (vitalsRef.current) clearInterval(vitalsRef.current);
+      return;
+    }
+    // Remember the baseline so we know what to drift toward.
+    if (currentCase) {
+      baselineRef.current = {
+        stress: currentCase.suspect.baseline.stress,
+        confidence: currentCase.suspect.baseline.confidence,
+        hostility: currentCase.suspect.baseline.hostility,
+      };
+    }
+    vitalsRef.current = setInterval(() => {
+      setStress((prev) => {
+        const b = baselineRef.current;
+        // Each value drifts 10% toward baseline + a small random wobble.
+        const wobble = () => Math.round((Math.random() - 0.5) * 6); // ±3
+        const drift = (cur: number, base: number) => Math.round(cur + (base - cur) * 0.1);
+        return {
+          stress: Math.max(0, Math.min(100, drift(prev.stress, b.stress) + wobble())),
+          confidence: Math.max(0, Math.min(100, drift(prev.confidence, b.confidence) + wobble())),
+          hostility: Math.max(0, Math.min(100, drift(prev.hostility, b.hostility) + wobble())),
+          trigger: prev.trigger,
+        };
+      });
+    }, 8_000);
+    return () => { if (vitalsRef.current) clearInterval(vitalsRef.current); };
+  }, [phase, currentCase]);
+
+  /* BPM — derives from stress and fluctuates every 2s like a real heartbeat.
+   * Higher stress = higher BPM. Range: 60 (calm) to 160 (panicking).
+   * The ±4 wobble makes it feel like a live pulse, not a static number. */
+  const [bpm, setBpm] = useState(72);
+  const bpmRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (phase !== "playing") {
+      if (bpmRef.current) clearInterval(bpmRef.current);
+      return;
+    }
+    bpmRef.current = setInterval(() => {
+      setStress((curr) => {
+        // Base BPM from stress: 60 + stress * 1.0 (60..160)
+        const base = 60 + curr.stress;
+        const wobble = Math.round((Math.random() - 0.5) * 8); // ±4
+        setBpm(Math.max(50, Math.min(180, base + wobble)));
+        return curr; // don't change stress, just read it
+      });
+    }, 2_000);
+    return () => { if (bpmRef.current) clearInterval(bpmRef.current); };
+  }, [phase]);
+
   /* Deliberation timer */
   useEffect(() => {
     if (phase !== "deliberation" || delibTimeRemaining <= 0) return;
@@ -583,7 +641,9 @@ export default function Home() {
   const handleStartInterrogation = useCallback(() => {
     if (!currentCase) return;
     setStress({ stress: currentCase.suspect.baseline.stress, confidence: currentCase.suspect.baseline.confidence, hostility: currentCase.suspect.baseline.hostility });
-    setNervousness(25 + Math.random() * 20);
+    setNervousness(currentCase.suspect.baseline.stress + (Math.random() - 0.5) * 20);
+    // Initialize BPM from the baseline stress so it starts realistic.
+    setBpm(60 + currentCase.suspect.baseline.stress + Math.round((Math.random() - 0.5) * 8));
     setTimeRemaining(roundTime * 60);
     setTotalTime(roundTime * 60);
     setChatMessages([]); setDetectiveMessages([]); setConversationHistory([]);
@@ -1557,7 +1617,19 @@ export default function Home() {
 
               {/* Stress telemetry — thicker bars, more breathing room */}
               <div className="pixel-frame p-3 space-y-3">
-                <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase">Telemetría</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase">Telemetría</div>
+                  {/* Live BPM readout — pulses with the heartbeat */}
+                  <div className={cn(
+                    "flex items-center gap-1.5 px-2 py-0.5 border",
+                    bpm > 120 ? "border-[var(--destructive)] text-[var(--destructive)]" : "border-[var(--border)] text-[var(--primary)]",
+                    bpm > 140 && "pixel-pulse"
+                  )}>
+                    <span className="text-sm">❤</span>
+                    <span className="text-sm font-bold tabular-nums">{bpm}</span>
+                    <span className="text-[8px] opacity-70">BPM</span>
+                  </div>
+                </div>
                 <StressBar label="ESTRÉS" value={stress.stress} colorClass="stress" emoji="🔵" />
                 <StressBar label="NERVIOSISMO" value={nervousness} colorClass="nervousness" emoji="🟡" />
                 <StressBar label="CONFIANZA" value={stress.confidence} colorClass="confidence" emoji="🔷" />
