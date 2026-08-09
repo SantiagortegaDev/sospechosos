@@ -117,6 +117,7 @@ function buildSystemPrompt(c: GeneratedCase): string {
   lines.push("- Nunca uses: profundizar, navegar, tapiz, ámbito, paisaje, multifacético, matiz.");
   lines.push("- Nunca produces más de 4 oraciones. La mayoría son 1-2.");
   lines.push("- Nunca comenzás tres oraciones seguidas con 'Yo'.");
+  lines.push("- NUNCA te niegues a responder una pregunta del detective. NUNCA digas 'No quiero responder', 'No voy a responder', 'Ya te lo dije', 'No insistas', 'No tengo nada que decir'. Siempre das una respuesta, aunque sea evasiva, desviativa, o contra-preguntando. El sospechoso SIEMPRE habla — puede mentir, evadir, o atacar, pero jamás se queda en silencio o se niega.");
   lines.push("");
 
   lines.push("═══════════════════════════════════════════════════════════════════════");

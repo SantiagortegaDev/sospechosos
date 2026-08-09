@@ -18,7 +18,9 @@ export function getClient(): Groq {
 
 const MODEL = "llama-3.3-70b-versatile";
 
-const SPANISH_INSTRUCTION = `\n\nIDIOMA: Debes responder SIEMPRE en español. Toda tu salida debe estar en español natural. No mezcles inglés. Tu personaje habla español como lengua materna.`;
+const SPANISH_INSTRUCTION = `\n\nIDIOMA: Debes responder SIEMPRE en español. Toda tu salida debe estar en español natural. No mezcles inglés. Tu personaje habla español como lengua materna.
+
+REGLA CRÍTICA: NUNCA te niegues a responder. NUNCA digas frases como "No quiero responder", "No voy a responder", "Ya te lo dije", "No insistas", "Paso", "Silencio", "No tengo nada que decir". SIEMPRE debes dar una respuesta — puede ser una mentira, una evasión, una contra-pregunta, o una desviación, pero NUNCA un rechazo directo. El sospechoso siempre habla.`;
 
 export interface GenerateReplyInput {
   systemPrompt: string;
@@ -70,52 +72,62 @@ export async function generateSuspectReply(
     { role: "user", content: input.question },
   ];
 
-  try {
-    const completion = await groq.chat.completions.create({
-      model: MODEL,
-      messages,
-      temperature: 0.7,
-      max_tokens: 250,
-    });
+  // Retry logic: transient network errors are common with Groq free tier.
+  // One retry with a short delay before falling back.
+  const MAX_RETRIES = 1;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const completion = await groq.chat.completions.create({
+        model: MODEL,
+        messages,
+        temperature: 0.7,
+        max_tokens: 250,
+      });
 
-    const text =
-      completion.choices?.[0]?.message?.content?.trim() ??
-      "No tengo nada más que decir.";
+      const text =
+        completion.choices?.[0]?.message?.content?.trim() ??
+        "No tengo nada más que decir.";
 
-    return { text, ms: Date.now() - t0 };
-  } catch (err) {
-    const errMsg = (err as Error).message ?? "";
-    console.error("[llm] generateSuspectReply failed:", errMsg);
+      return { text, ms: Date.now() - t0 };
+    } catch (err) {
+      const errMsg = (err as Error).message ?? "";
+      console.error(`[llm] generateSuspectReply failed (attempt ${attempt + 1}):`, errMsg);
 
-    // Detect rate limit (429) specifically — the user is out of Groq tokens
-    // for the day. Give them a useful in-character message that explains it
-    // instead of the same "abogado" line on every question.
-    if (errMsg.includes("429") || errMsg.includes("rate_limit")) {
-      return {
-        text: "[Límite de Groq alcanzado — espera unos minutos o usa una seed ya generada. El sospechoso permanece en silencio.]",
-        ms: Date.now() - t0,
-        rateLimited: true,
-      };
+      // Detect rate limit (429) — no point retrying, bail immediately.
+      if (errMsg.includes("429") || errMsg.includes("rate_limit")) {
+        return {
+          text: "[Límite de Groq alcanzado — espera unos minutos o usa una seed ya generada. El sospechoso permanece en silencio.]",
+          ms: Date.now() - t0,
+          rateLimited: true,
+        };
+      }
+
+      // If we have retries left, wait 1s and try again.
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+
+      // Final fallback after all retries exhausted — in-character evasion,
+      // NOT flat refusal. The suspect deflects instead of shutting down.
+      const fallbacks = [
+        "Mira, no creo que eso tenga importancia ahora.",
+        "¿Me puedes repetir la pregunta? Estaba distraído.",
+        "Prefiero no hablar de eso por ahora.",
+        "Eso... no sé qué decirte exactamente.",
+        "¿Podemos hablar de otra cosa?",
+        "No estoy seguro de cómo responder a eso.",
+        "Eso no tiene nada que ver con lo que pasó.",
+        "Déjame pensar un momento... no, no tengo nada que agregar.",
+        "¿Por qué me preguntas eso? No tiene sentido.",
+        "No recuerdo los detalles exactos de eso.",
+      ];
+      const text = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      return { text, ms: Date.now() - t0 };
     }
-
-    // For other errors (network, server, etc.) — return a VARIED in-character
-    // fallback, not always the same "abogado" line. The detective still gets
-    // something to react to, and it doesn't break immersion as badly.
-    const fallbacks = [
-      "No tengo nada más que decir.",
-      "Esa pregunta no la voy a responder.",
-      "Ya te lo dije. No insistas.",
-      "Silencio.",
-      "No recuerdo.",
-      "¿Por qué me preguntas eso otra vez?",
-      "No veo cómo eso sea relevante.",
-      "Paso.",
-      "No tengo por qué explicarte nada.",
-      "Ya respondí lo suficiente.",
-    ];
-    const text = fallbacks[Math.floor(Math.random() * fallbacks.length)];
-    return { text, ms: Date.now() - t0 };
   }
+  // Should never reach here, but TypeScript needs it.
+  return { text: "...", ms: Date.now() - t0 };
 }
 
 /**

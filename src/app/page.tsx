@@ -266,6 +266,7 @@ export default function Home() {
   const nervousnessRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const phaseRef = useRef<GamePhase>(phase);
   const seenMsgIds = useRef<Set<string>>(new Set());
+  const interrogatingRef = useRef(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
@@ -594,6 +595,8 @@ export default function Home() {
     e.preventDefault();
     const text = chatDraft.trim();
     if (!text || pending || !currentCase || !session) return;
+    if (interrogatingRef.current) return; // Prevent double-fire from React re-renders
+    interrogatingRef.current = true;
     setChatDraft(""); setPending(true); setQuestionsAsked((prev) => prev + 1);
     // SFX: send question blip (ascending square wave)
     SFX.soundSendQuestion();
@@ -708,7 +711,7 @@ export default function Home() {
       console.error("[interrogate] failed:", err);
       setError("Error en la interrogación");
       SFX.soundError();
-    } finally { setPending(false); }
+    } finally { setPending(false); interrogatingRef.current = false; }
   }, [chatDraft, pending, currentCase, session, playerId, conversationHistory, stress, sendGame, maxStress, questionsAsked, unlockAchievement, selectedEvidence, technique]);
 
   const handleSendDetective = useCallback(async (e: React.FormEvent) => {
@@ -1485,7 +1488,7 @@ export default function Home() {
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* LEFT: Suspect panel */}
-          <aside className="hidden md:flex flex-col w-72 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
+          <aside className="hidden md:flex flex-col w-64 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
             <div className="pixel-header"><span>SOSPECHOSO</span></div>
             <div className="p-5 space-y-5 flex-1 overflow-y-auto pixel-scroll">
               {/* Portrait + identity card */}

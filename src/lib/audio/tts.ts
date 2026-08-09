@@ -1,13 +1,15 @@
 /**
- * Text-to-Speech wrapper -- Web Speech API + AudioContext filter.
+ * Text-to-Speech wrapper -- Web Speech API.
  *
- * Configured to sound like Jorge Loquendo -- the classic Spanish male
- * TTS voice. Uses the best available male Spanish voice and applies
- * an AudioContext low-pass filter to give it that characteristic
- * warm, slightly muffled Loquendo sound.
+ * Configured to approximate a Loquendo-style voice:
+ * - Deep pitch (0.7 for men, 0.95 for women)
+ * - Slightly fast rate (1.1) for that classic brisk delivery
+ * - Uses the best available Spanish male voice
  *
- * The audio filter only works when there's an active AudioContext.
- * Falls back to plain SpeechSynthesis on mobile/safari.
+ * NOTE: True "Jorge Loquendo" is a proprietary TTS engine not available
+ * in browsers. This uses the best approximation possible with Web Speech API.
+ * For actual Loquendo quality, an external TTS service (ElevenLabs, Google Cloud)
+ * would be needed.
  */
 
 import { isMuted } from "./sound-engine";
@@ -16,35 +18,10 @@ import type { Gender } from "@/lib/ai/generated-case";
 let _maleVoice: SpeechSynthesisVoice | null = null;
 let _femaleVoice: SpeechSynthesisVoice | null = null;
 let _voicesLoaded = false;
-let _audioCtx: AudioContext | null = null;
-let _filterNode: BiquadFilterNode | null = null;
-let _mediaStreamDest: MediaStreamAudioDestinationNode | null = null;
 
-// Loquendo voice patterns
-const LOQUENDO_PATTERNS = /jorge|loquendo/i;
+// Voice patterns for selection priority
 const FEMALE_PATTERNS = /female|mujer|maria|paulina|monica|helena|laura|lucia|sofia|isabel|penelope|elvira|fem/i;
-const MALE_PATTERNS = /male|hombre|diego|carlos|juan|miguel|pablo|alejandro|javier|ricardo|masculino/i;
-
-/** Initialize the AudioContext + low-pass filter for Loquendo warmth */
-function ensureAudioContext(): boolean {
-  if (typeof window === "undefined" || !("AudioContext" in window)) return false;
-  try {
-    if (!_audioCtx) {
-      _audioCtx = new AudioContext();
-      _filterNode = _audioCtx.createBiquadFilter();
-      _filterNode.type = "lowpass";
-      _filterNode.frequency.value = 3200;   // Loquendo warmth cutoff
-      _filterNode.Q.value = 0.7;              // Gentle resonance
-      _mediaStreamDest = _audioCtx.createMediaStreamDestination();
-      _filterNode.connect(_mediaStreamDest);
-      _filterNode.connect(_audioCtx.destination);
-    }
-    if (_audioCtx.state === "suspended") _audioCtx.resume();
-    return true;
-  } catch {
-    return false;
-  }
-}
+const MALE_PATTERNS = /male|hombre|diego|carlos|juan|miguel|pablo|alejandro|javier|ricardo|masculino|jorge|loquendo/i;
 
 function loadVoices(): void {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -54,9 +31,8 @@ function loadVoices(): void {
 
   const spanishVoices = voices.filter((v) => v.lang?.startsWith("es"));
 
-  // Jorge Loquendo priority: any voice with "jorge" or "loquendo" in name
+  // Prefer any Loquendo/Jorge voice, then male Spanish, then fallback
   _maleVoice =
-    spanishVoices.find((v) => LOQUENDO_PATTERNS.test(v.name)) ||
     spanishVoices.find((v) => MALE_PATTERNS.test(v.name)) ||
     spanishVoices.find((v) => !FEMALE_PATTERNS.test(v.name)) ||
     spanishVoices[0] ||
@@ -79,16 +55,16 @@ export function isTTSAvailable(): boolean {
 }
 
 /**
- * Speak the given text. Configured for Jorge Loquendo style:
- * - Deep male voice (pitch 0.75) or female (pitch 1.0)
+ * Speak the given text. Configured for a Loquendo-like style:
+ * - Deep male voice (pitch 0.7) or female (pitch 0.95)
  * - Slightly fast rate (1.1) -- Loquendo was known for clear, brisk speech
- * - AudioContext low-pass filter for warmth
  */
 export function speak(text: string, gender: Gender = "man"): void {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   if (isMuted()) return;
   if (!text?.trim()) return;
 
+  // Cancel any previous speech to prevent double-play
   window.speechSynthesis.cancel();
   if (!_voicesLoaded) loadVoices();
 
@@ -105,8 +81,8 @@ export function speak(text: string, gender: Gender = "man"): void {
     utterance.lang = "es-ES";
   }
 
-  // Jorge Loquendo signature: deep, brisk, clear
-  utterance.pitch = gender === "woman" ? 1.0 : 0.75;
+  // Loquendo approximation: deep, brisk, clear
+  utterance.pitch = gender === "woman" ? 0.95 : 0.7;
   utterance.rate = 1.1;
   utterance.volume = 0.95;
 
