@@ -338,6 +338,9 @@ export default function Home() {
   const lobbyPlayersRef = useRef(lobbyPlayers);
   const seenMsgIds = useRef<Set<string>>(new Set());
   const interrogatingRef = useRef(false);
+  /* Guards against duplicate game.start fetches when the host's retry
+   * broadcasts arrive. Reset on playAgain / leaveRoom. */
+  const gameStartReceivedRef = useRef(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { lobbyPlayersRef.current = lobbyPlayers; }, [lobbyPlayers]);
@@ -349,9 +352,11 @@ export default function Home() {
   const { send: sendGame, presence } = useChannel({
     channelId: channels?.game ?? "__empty__",
     history: (phase === "playing" || phase === "evidence_review") ? 30 : "none",
-    enabled:
-      (phase === "lobby" || phase === "playing" || phase === "deliberation" || phase === "vote" || phase === "evidence_review") &&
-      !!channels,
+    // Always enable the channel whenever we have a session — even in
+    // join_by_link / case_intro / verdict / revelation / results phases.
+    // Disabling on phase change caused the channel to disconnect/reconnect
+    // and miss messages (especially game.start and lobby.join).
+    enabled: !!channels,
     onMessage: (msg: any) => {
       try {
         const type = msg?.type ?? msg?.content?.type;
@@ -468,16 +473,26 @@ export default function Home() {
           // This avoids sending RegExp objects through the Portal SDK which
           // caused React #310 (InterpretGeneratorResume crash).
           const seed = payload.seed as string | undefined;
-          if (seed && !currentCase) {
-            // Non-host: fetch the generated case using the seed
-            const loadCase = async () => {
+          if (seed && !currentCase && !gameStartReceivedRef.current) {
+            // Mark as received so we don't trigger duplicate fetches when
+            // the host's retry broadcasts arrive.
+            gameStartReceivedRef.current = true;
+            // Non-host: fetch the generated case using the seed, with retry
+            // in case the generate-case API is rate-limited or cold.
+            const loadCase = async (attempt: number) => {
               try {
                 const res = await fetch("/api/generate-case", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ seed }),
                 });
-                if (!res.ok) { console.error("[game.start] Failed to fetch case for seed:", seed); return; }
+                if (!res.ok) {
+                  console.error(`[game.start] Failed to fetch case for seed (attempt ${attempt + 1}):`, seed, res.status);
+                  if (attempt < 5) {
+                    setTimeout(() => loadCase(attempt + 1), 1500 * (attempt + 1));
+                  }
+                  return;
+                }
                 const generated = await res.json() as GeneratedCase;
                 rememberGender(generated.seed, generated.suspect?.gender ?? "man");
                 setGeneratedCaseRaw(generated);
@@ -491,9 +506,12 @@ export default function Home() {
                 SFX.soundCaseReady();
               } catch (err) {
                 console.error("[game.start] Failed to load case:", err);
+                if (attempt < 5) {
+                  setTimeout(() => loadCase(attempt + 1), 1500 * (attempt + 1));
+                }
               }
             };
-            loadCase();
+            loadCase(0);
           }
         }
 
@@ -515,10 +533,35 @@ export default function Home() {
     },
   });
 
+  /* Presence polling — every 2s while in the lobby, broadcast our presence
+   * so the other detective sees us even if the initial lobby.join was lost.
+   * This is a robust fallback against Portal SDK connection timing issues. */
+  useEffect(() => {
+    if (phase !== "lobby" || !session) return;
+    const announce = () => {
+      try {
+        sendGame({
+          type: "lobby.presence",
+          content: {
+            type: "lobby.presence",
+            playerId,
+            username: session.username,
+            isHost: session.isHost,
+          },
+        });
+      } catch { /* ignore */ }
+    };
+    // Announce immediately, then every 2s.
+    announce();
+    const interval = setInterval(announce, 2000);
+    return () => clearInterval(interval);
+  }, [phase, session, playerId, sendGame]);
+
   const { send: sendDetective } = useChannel({
     channelId: channels?.detectives ?? "__empty__",
     history: (phase === "playing" || phase === "deliberation" || phase === "evidence_review") ? 30 : "none",
-    enabled: (phase === "playing" || phase === "deliberation" || phase === "evidence_review") && !!channels,
+    // Always enable when we have a session — same rationale as the game channel.
+    enabled: !!channels,
     onMessage: (msg: any) => {
       try {
         const payload = msg?.content ?? msg;
@@ -848,16 +891,23 @@ export default function Home() {
       setLobbyPlayers((prev) => [...prev, { id: playerId, username: username.trim(), isHost: false }]);
       setPhase("lobby");
       SFX.soundConnect();
-      // Broadcast lobby.join so the host sees us. We retry briefly because
-      // the channel subscription may not be ready the instant setPhase fires.
-      setTimeout(() => {
+      // Broadcast lobby.join so the host sees us. Retry several times with
+      // backoff because the channel subscription may not be ready the instant
+      // setPhase fires — the Portal SDK takes a moment to establish the
+      // websocket connection after `enabled` flips to true.
+      const uname = username.trim();
+      const broadcastJoin = (attempt: number) => {
         try {
           sendGame({
             type: "lobby.join",
-            content: { type: "lobby.join", playerId, username: username.trim(), isHost: false },
+            content: { type: "lobby.join", playerId, username: uname, isHost: false },
           });
         } catch { /* ignore */ }
-      }, 500);
+        if (attempt < 5) {
+          setTimeout(() => broadcastJoin(attempt + 1), 500 * (attempt + 1));
+        }
+      };
+      broadcastJoin(0);
     } catch { setError("Error al unirse a la sala"); } finally { setLoading(false); }
   }, [username, roomCode, playerId, sendGame]);
 
@@ -884,7 +934,19 @@ export default function Home() {
     // non-serializable and cause React #310 inside the Portal SDK's
     // async generator internals (InterpretGeneratorResume).
     // The non-host will fetch the case from /api/generate-case using the seed.
-    try { await sendGame({ type: "game.start", content: { type: "game.start", seed: generated.seed } }); } catch { /* ok */ }
+    //
+    // Retry the broadcast several times with backoff — the non-host may
+    // not be fully connected to the channel yet when the host finishes
+    // generating the case, and a single send could be lost.
+    const broadcastStart = (attempt: number) => {
+      try {
+        sendGame({ type: "game.start", content: { type: "game.start", seed: generated.seed } });
+      } catch { /* ignore */ }
+      if (attempt < 8) {
+        setTimeout(() => broadcastStart(attempt + 1), 400 * (attempt + 1));
+      }
+    };
+    broadcastStart(0);
     setPhase("case_intro"); setCaseIntroStep(0);
     SFX.soundCaseReady();
   }, [sendGame]);
@@ -1160,6 +1222,7 @@ export default function Home() {
     setVerdict(null); setEnding(null); setUnlockedAchievements([]);
     setTimeRemaining(0); setTotalTime(0); setEvidenceItems([]);
     setRevelation(null);
+    gameStartReceivedRef.current = false;
     // Reset welcome screen state so the flash animation doesn't get stuck
     // and the mount animation replays cleanly.
     setWelcomeFlash(false);
@@ -1171,6 +1234,7 @@ export default function Home() {
     if (timerRef.current) clearInterval(timerRef.current);
     if (delibTimerRef.current) clearInterval(delibTimerRef.current);
     clearSession(); setSession(null); setRoomCode(""); setUsername("");
+    gameStartReceivedRef.current = false;
     setWelcomeFlash(false); setWelcomeMounted(false);
     setPhase("welcome");
   }, []);
