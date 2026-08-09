@@ -144,6 +144,14 @@ function getPhaseSteps(currentPhase: GamePhase): Array<{ key: string; label: str
   return all;
 }
 
+/** Defense-in-depth: coerce any value to a safe React-renderable string. */
+function safeRender(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "";
+  try { return JSON.stringify(v); }
+  catch { return String(v); }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
  * MAIN COMPONENT
  * ═══════════════════════════════════════════════════════════════════════ */
@@ -1293,30 +1301,30 @@ export default function Home() {
           {caseIntroStep >= 0 && (
             <div className={cn("transition-all duration-700", caseIntroStep === 0 ? "opacity-100 translate-y-0" : "opacity-40")}>
               <div className="flex items-center justify-center gap-3 mb-2">{c.difficulty && <DifficultyBadge difficulty={c.difficulty} />}</div>
-              <h1 className="text-2xl md:text-4xl font-bold text-[var(--primary)] tracking-widest" style={headFont}>{c.title}</h1>
-              <div className="text-xs text-[var(--muted-foreground)] mt-2" style={bodyFont}>{c.subtitle}</div>
+              <h1 className="text-2xl md:text-4xl font-bold text-[var(--primary)] tracking-widest" style={headFont}>{safeRender(c.title)}</h1>
+              <div className="text-xs text-[var(--muted-foreground)] mt-2" style={bodyFont}>{safeRender(c.subtitle)}</div>
             </div>
           )}
           {caseIntroStep >= 1 && (
             <div className={cn("transition-all duration-700 delay-100", caseIntroStep === 1 ? "opacity-100 translate-y-0" : "opacity-40")}>
               <div className="text-sm text-[var(--primary)] tracking-widest" style={bodyFont}>{c.date}</div>
               <div className="text-xs text-[var(--muted-foreground)] tracking-widest mt-1" style={bodyFont}>{c.location}</div>
-              <div className="text-xs text-[var(--destructive)] tracking-wider mt-2" style={bodyFont}>{c.stakes}</div>
+              <div className="text-xs text-[var(--destructive)] tracking-wider mt-2" style={bodyFont}>{safeRender(c.stakes)}</div>
             </div>
           )}
           {caseIntroStep >= 2 && (
             <div className={cn("pixel-frame p-4 transition-all duration-700 delay-200", caseIntroStep === 2 ? "opacity-100 translate-y-0" : "opacity-40")}>
-              <p className="text-sm text-[var(--foreground)] leading-relaxed text-left" style={bodyFont}>{c.briefing}</p>
+              <p className="text-sm text-[var(--foreground)] leading-relaxed text-left" style={bodyFont}>{safeRender(c.briefing)}</p>
             </div>
           )}
           {caseIntroStep >= 3 && (
             <div className={cn("pixel-frame p-4 transition-all duration-700 delay-200", caseIntroStep === 3 ? "opacity-100 translate-y-0" : "opacity-40")}>
               <div className="text-xs text-[var(--foreground)] tracking-wider mb-3" style={bodyFont}>SOSPECHOSO</div>
               <div className="flex items-center gap-4">
-                <div className="text-4xl">{s.avatar}</div>
+                <div className="text-4xl">{safeRender(s.avatar)}</div>
                 <div className="text-left">
-                  <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>{s.name}</div>
-                  <div className="text-xs text-[var(--muted-foreground)] mt-1" style={bodyFont}>{s.age ? `${s.age} anos · ` : ""}{s.role}</div>
+                  <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>{safeRender(s.name)}</div>
+                  <div className="text-xs text-[var(--muted-foreground)] mt-1" style={bodyFont}>{s.age ? `${s.age} anos · ` : ""}{safeRender(s.role)}</div>
                 </div>
               </div>
             </div>
@@ -1324,13 +1332,13 @@ export default function Home() {
           {caseIntroStep >= 4 && (
             <div className={cn("pixel-frame p-4 text-left transition-all duration-700 delay-300", caseIntroStep === 4 ? "opacity-100 translate-y-0" : "opacity-40")}>
               <div className="text-xs text-[var(--foreground)] tracking-wider mb-3" style={bodyFont}>HECHOS CONOCIDOS</div>
-              <ul className="space-y-1">{s.knownFacts.map((f, i) => <li key={i} className="text-xs text-[var(--foreground)] flex gap-2" style={bodyFont}><span className="text-[var(--primary)] shrink-0">-</span>{f}</li>)}</ul>
+              <ul className="space-y-1">{s.knownFacts.map((f, i) => <li key={i} className="text-xs text-[var(--foreground)] flex gap-2" style={bodyFont}><span className="text-[var(--primary)] shrink-0">-</span>{safeRender(f)}</li>)}</ul>
             </div>
           )}
           {caseIntroStep >= 5 && evidenceItems.length > 0 && (
             <div className={cn("pixel-frame p-4 text-left transition-all duration-700 delay-300", caseIntroStep === 5 ? "opacity-100 translate-y-0" : "opacity-40")}>
               <div className="text-xs text-[var(--foreground)] tracking-wider mb-3" style={bodyFont}>EVIDENCIA ({evidenceItems.length} PIEZAS)</div>
-              <ul className="space-y-1">{evidenceItems.slice(0, 6).map((ev, i) => <li key={i} className="text-xs text-[var(--foreground)] flex gap-2" style={bodyFont}><span className={cn("shrink-0", ev.isRedHerring ? "text-[var(--destructive)]" : "text-[#4ec9b0]")}>-</span><span>{ev.label}{ev.isLocked ? " (BLOQUEADA)" : ""}</span></li>)}</ul>
+              <ul className="space-y-1">{evidenceItems.slice(0, 6).map((ev, i) => <li key={i} className="text-xs text-[var(--foreground)] flex gap-2" style={bodyFont}><span className={cn("shrink-0", ev.isRedHerring ? "text-[var(--destructive)]" : "text-[#4ec9b0]")}>-</span><span>{safeRender(ev.label)}{ev.isLocked ? " (BLOQUEADA)" : ""}</span></li>)}</ul>
             </div>
           )}
           {caseIntroStep >= totalSteps - 1 ? (
@@ -1380,10 +1388,10 @@ export default function Home() {
                     <div key={ev.id} className={cn("pixel-frame p-3 transition-all", ev.isLocked && "opacity-60")}>
                       <div className="flex items-center gap-2">
                         <span className="text-sm">{ev.isRedHerring ? "🔴" : ev.isLocked ? "🔒" : "📄"}</span>
-                        <span className="text-xs font-bold text-[var(--foreground)] tracking-wider">{ev.label}</span>
+                        <span className="text-xs font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
                         {ev.isRedHerring && <span className="pixel-badge danger text-xs">PISTA FALSA</span>}
                       </div>
-                      {!ev.isLocked && <div className="text-xs text-[var(--muted-foreground)] mt-1">{ev.description}</div>}
+                      {!ev.isLocked && <div className="text-xs text-[var(--muted-foreground)] mt-1">{safeRender(ev.description)}</div>}
                       {ev.isLocked && <div className="text-[13px] text-[var(--primary)]/70 mt-1 italic">💡 {hint}</div>}
                     </div>
                     );
@@ -1398,8 +1406,8 @@ export default function Home() {
                 <div className="space-y-2">
                   {currentCase.timeline.map((t, i) => (
                     <div key={i} className="flex gap-3 text-xs">
-                      <span className="text-[var(--primary)] font-bold shrink-0">[{t.time}]</span>
-                      <span className={t.isPublic ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)] italic"}>{t.event}</span>
+                      <span className="text-[var(--primary)] font-bold shrink-0">[{safeRender(t.time)}]</span>
+                      <span className={t.isPublic ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)] italic"}>{safeRender(t.event)}</span>
                     </div>
                   ))}
                 </div>
@@ -1508,16 +1516,16 @@ export default function Home() {
               <div className="space-y-4">
                 <div className="pixel-frame p-3">
                   <div className="text-[13px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Resumen del caso</div>
-                  <p className="text-xs text-[var(--foreground)] leading-relaxed">{currentCase.briefing}</p>
+                  <p className="text-xs text-[var(--foreground)] leading-relaxed">{safeRender(currentCase.briefing)}</p>
                   {currentCase.difficulty && <div className="mt-3"><DifficultyBadge difficulty={currentCase.difficulty} /></div>}
                 </div>
                 <div className="pixel-frame p-3">
                   <div className="text-[13px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Sospechoso</div>
                   <div className="text-xs text-[var(--foreground)] flex items-center gap-2">
-                    <span className="text-lg">{suspect.avatar}</span>
+                    <span className="text-lg">{safeRender(suspect.avatar)}</span>
                     <div>
-                      <div className="font-bold">{suspect.name}</div>
-                      <div className="text-[13px] text-[var(--muted-foreground)]">{suspect.role}</div>
+                      <div className="font-bold">{safeRender(suspect.name)}</div>
+                      <div className="text-[13px] text-[var(--muted-foreground)]">{safeRender(suspect.role)}</div>
                     </div>
                   </div>
                 </div>
@@ -1527,7 +1535,7 @@ export default function Home() {
                     {suspect.knownFacts.map((f, i) => (
                       <div key={i} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
                         <span className="text-[var(--primary)] shrink-0">▸</span>
-                        <span>{f}</span>
+                        <span>{safeRender(f)}</span>
                       </div>
                     ))}
                   </div>
@@ -1543,9 +1551,9 @@ export default function Home() {
                       <div key={ev.id} className={cn("pixel-frame p-2 transition-all cursor-pointer hover:translate-y-[-2px]", ev.isLocked && "opacity-40", selectedEvidence?.id === ev.id && "pixel-frame-active")} onClick={() => { if (!ev.isLocked) { SFX.soundClick(); setSelectedEvidence(ev === selectedEvidence ? null : ev); } }}>
                         <div className="flex items-center gap-2">
                           <span className="text-sm">{ev.isRedHerring ? "🔴" : ev.isLocked ? "[LOCK]" : "[DOC]"}</span>
-                          <span className="text-[13px] font-bold text-[var(--foreground)] tracking-wider">{ev.label}</span>
+                          <span className="text-[13px] font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
                         </div>
-                        {!ev.isLocked && <div className="text-[13px] text-[var(--muted-foreground)] mt-1">{ev.description}</div>}
+                        {!ev.isLocked && <div className="text-[13px] text-[var(--muted-foreground)] mt-1">{safeRender(ev.description)}</div>}
                       </div>
                     ))}
                   </div>
@@ -1553,7 +1561,7 @@ export default function Home() {
                 {selectedEvidence && !selectedEvidence.isLocked && (
                   <div className="mt-3 border-t-2 border-[var(--border)] pt-3">
                     <div className="text-[13px] text-[var(--destructive)] tracking-wider mb-2">EVIDENCIA SELECCIONADA PARA PRESENTAR</div>
-                    <div className="pixel-frame-active p-2 mb-2"><div className="text-xs text-[var(--foreground)]">{selectedEvidence.description}</div></div>
+                    <div className="pixel-frame-active p-2 mb-2"><div className="text-xs text-[var(--foreground)]">{safeRender(selectedEvidence.description)}</div></div>
                   </div>
                 )}
               </div>
@@ -1635,8 +1643,8 @@ export default function Home() {
                 <div className={cn("flex justify-center mb-3", portraitShake && "pixel-portrait-shake")} style={{ filter: portraitTint }}>
                   <SuspectPortrait seed={currentCase?.id?.replace("gen_", "") ?? "default"} gender={recallGender(currentCase?.id?.replace("gen_", "") ?? "default")} avatar={suspect.avatar} size="lg" />
                 </div>
-                <div className="text-base font-bold text-[var(--primary)] tracking-wider" style={headFont}>{suspect.name}</div>
-                <div className="text-xs text-[var(--muted-foreground)] mt-1">{suspect.age ? `${suspect.age} años · ` : ""}{suspect.role}</div>
+                <div className="text-base font-bold text-[var(--primary)] tracking-wider" style={headFont}>{safeRender(suspect.name)}</div>
+                <div className="text-xs text-[var(--muted-foreground)] mt-1">{suspect.age ? `${suspect.age} años · ` : ""}{safeRender(suspect.role)}</div>
                 {/* Suspect tells */}
                 {activeTells.length > 0 && (
                   <div className="flex justify-center gap-1 mt-2">
@@ -1673,7 +1681,7 @@ export default function Home() {
                   {suspect.knownFacts.map((f, i) => (
                     <div key={i} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
                       <span className="text-[var(--primary)] shrink-0">▸</span>
-                      <span>{f}</span>
+                      <span>{safeRender(f)}</span>
                     </div>
                   ))}
                 </div>
@@ -1721,7 +1729,7 @@ export default function Home() {
               <div ref={chatEndRef} />
             </div>
             <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-2 flex gap-2 shrink-0">
-              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-xs text-[var(--destructive)]">📎 {selectedEvidence.label}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
+              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-xs text-[var(--destructive)]">📎 {safeRender(selectedEvidence.label)}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
               <input ref={chatInputRef} value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta al sospechoso...` : "Pregunta al sospechoso..."} disabled={pending} />
               <button type="submit" disabled={pending || !chatDraft.trim()} className="pixel-btn text-xs px-4">{pending ? "..." : "ENVIAR"}</button>
             </form>
@@ -1735,8 +1743,8 @@ export default function Home() {
             <div className="pixel-frame p-4 space-y-4">
               <div className="text-center">
                 <div className={cn("flex justify-center mb-3", portraitShake && "pixel-portrait-shake")} style={{ filter: portraitTint }}><SuspectPortrait seed={currentCase?.id?.replace("gen_", "") ?? "default"} gender={recallGender(currentCase?.id?.replace("gen_", "") ?? "default")} avatar={suspect.avatar} size="lg" /></div>
-                <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>{suspect.name}</div>
-                <div className="text-xs text-[var(--muted-foreground)] mt-1">{suspect.age ? `${suspect.age} años · ` : ""}{suspect.role}</div>
+                <div className="text-sm font-bold text-[var(--primary)] tracking-wider" style={headFont}>{safeRender(suspect.name)}</div>
+                <div className="text-xs text-[var(--muted-foreground)] mt-1">{suspect.age ? `${suspect.age} años · ` : ""}{safeRender(suspect.role)}</div>
               </div>
               <div className="space-y-2">
                 <StressBar label="ESTRÉS" value={stress.stress} colorClass="stress" emoji="🔵" />
@@ -1752,7 +1760,7 @@ export default function Home() {
         </div>
 
         <div className="md:hidden flex border-t-2 border-[var(--border)] bg-[var(--card)]">
-          {[{ key: "chat" as const, label: "💬 CHAT" }, { key: "sospechoso" as const, label: `${suspect.avatar} SOSPECHOSO` }, { key: "panel" as const, label: "📋 PANEL" }].map((tab) => (
+          {[{ key: "chat" as const, label: "💬 CHAT" }, { key: "sospechoso" as const, label: `${safeRender(suspect.avatar)} SOSPECHOSO` }, { key: "panel" as const, label: "📋 PANEL" }].map((tab) => (
             <button key={tab.key} onClick={() => { setMobileTab(tab.key); SFX.soundTab(); }} className={cn("flex-1 py-2 text-xs tracking-wider transition-colors cursor-pointer", mobileTab === tab.key ? "text-[var(--primary)] bg-[var(--primary)]/5 border-b-2 border-[var(--primary)]" : "text-[var(--muted-foreground)]")} style={bodyFont}>{tab.label}</button>
           ))}
         </div>
@@ -1777,7 +1785,7 @@ export default function Home() {
               <div><div className="text-xs text-[var(--foreground)] tracking-wider">ESTRÉS MÁXIMO</div><div className="text-lg font-bold text-[var(--destructive)]">{maxStress}%</div></div>
               <div><div className="text-xs text-[var(--foreground)] tracking-wider">FLAGGED</div><div className="text-lg font-bold text-[var(--destructive)]">{flaggedCount}</div></div>
               <div><div className="text-xs text-[var(--foreground)] tracking-wider">EVIDENCIA</div><div className="text-lg font-bold text-[var(--primary)]">{evidenceItems.filter(e => !e.isLocked).length}/{evidenceItems.length}</div></div>
-              <div className="border-t border-[var(--border)] pt-2"><div className="text-xs text-[var(--foreground)] mb-1">SOSPECHOSO</div><div className="text-xs text-[var(--foreground)]">{currentCase?.suspect.avatar} {currentCase?.suspect.name} — {currentCase?.suspect.role}</div></div>
+              <div className="border-t border-[var(--border)] pt-2"><div className="text-xs text-[var(--foreground)] mb-1">SOSPECHOSO</div><div className="text-xs text-[var(--foreground)]">{safeRender(currentCase?.suspect.avatar)} {safeRender(currentCase?.suspect.name)} — {safeRender(currentCase?.suspect.role)}</div></div>
             </div>
             <button onClick={() => { SFX.soundClick(); skipToVote(); }} className="pixel-btn w-full py-3 mt-auto" style={headFont}>VOTAR AHORA</button>
           </aside>
@@ -1807,7 +1815,7 @@ export default function Home() {
         <div className="pixel-frame max-w-2xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto pixel-scroll">
           <div className="pixel-header"><span>FASE DE VOTACIÓN</span></div>
           <div className="text-center">
-            <div className="text-sm font-bold text-[var(--primary)] tracking-widest" style={headFont}>¿Es {currentCase?.suspect.name} culpable o inocente?</div>
+            <div className="text-sm font-bold text-[var(--primary)] tracking-widest" style={headFont}>¿Es {safeRender(currentCase?.suspect.name)} culpable o inocente?</div>
             <div className="text-xs text-[var(--muted-foreground)] mt-1">Tu voto es definitivo. Revisa tu evidencia antes de decidir.</div>
           </div>
 
@@ -1839,7 +1847,7 @@ export default function Home() {
                 {unlockedEvidence.map((ev) => (
                   <div key={ev.id} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
                     <span className="text-[var(--primary)] shrink-0">▸</span>
-                    <span><strong className="text-[var(--primary)]">{ev.label}:</strong> {ev.description}</span>
+                    <span><strong className="text-[var(--primary)]">{safeRender(ev.label)}:</strong> {safeRender(ev.description)}</span>
                   </div>
                 ))}
               </div>
@@ -1898,7 +1906,7 @@ export default function Home() {
               <div className="pixel-frame p-8" key={shakeKey}>
                 <div className="text-3xl mb-4">{verdict.decision === "imprisoned" ? "[CHAIN]" : "[UNLOCK]"}</div>
                 <div className={cn("text-xl md:text-2xl font-bold tracking-widest", verdict.decision === "imprisoned" ? "text-[var(--destructive)]" : "text-[#4ec9b0]")} style={headFont}>{verdict.decision === "imprisoned" ? "ENCARCELADO" : "LIBRE"}</div>
-                <div className="text-xs text-[var(--muted-foreground)] mt-2 tracking-wider">{currentCase?.suspect.name} {verdict.decision === "imprisoned" ? "ha sido encontrado culpable" : "ha sido absuelto"}</div>
+                <div className="text-xs text-[var(--muted-foreground)] mt-2 tracking-wider">{safeRender(currentCase?.suspect.name)} {verdict.decision === "imprisoned" ? "ha sido encontrado culpable" : "ha sido absuelto"}</div>
               </div>
               <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--primary)] mb-2" style={headFont}>RAZONAMIENTO DE LA JUEZA</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{verdict.judgeReasoning}"</p></div>
               <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--muted-foreground)] mb-2" style={headFont}>COMENTARIO</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{verdict.judgesComment}"</p></div>

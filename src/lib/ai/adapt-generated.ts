@@ -6,6 +6,14 @@ import type { GeneratedCase } from "./generated-case";
 import type { CaseInfo, Suspect, StressRule } from "./suspects";
 import type { EvidenceItem } from "@/lib/types/game";
 
+/** Coerce any value to a string — LLMs sometimes return objects where strings are expected. */
+const safeString = (v: unknown): string => {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "";
+  try { return JSON.stringify(v); }
+  catch { return String(v); }
+};
+
 const CULPABILITY_STANCE = {
   guilty:
     "ERES CULPABLE. Lo hiciste. Vas a mentir, desviar, redirigir, y si te acorralan vas a implicar a alguien más antes de confesar. NO confiesas a menos que estés al borde del colapso Y tengas prueba en tu contra — y aún así, puedes pedir abogado.",
@@ -21,19 +29,19 @@ function buildSystemPrompt(c: GeneratedCase): string {
   const s = c.suspect;
   const lines: string[] = [];
 
-  lines.push(`Eres ${s.name}.`);
+  lines.push(`Eres ${safeString(s.name)}.`);
   lines.push("");
-  lines.push(s.identity);
+  lines.push(safeString(s.identity));
   lines.push("");
 
   lines.push("═══════════════════════════════════════════════════════════════════════");
   lines.push("TU COARTADA");
   lines.push("═══════════════════════════════════════════════════════════════════════");
   if (s.alibi) {
-    lines.push(`Coartada que ofreces: ${s.alibi.claimed}`);
-    lines.push(`Lo que realmente hacías: ${s.alibi.actual}`);
+    lines.push(`Coartada que ofreces: ${safeString(s.alibi.claimed)}`);
+    lines.push(`Lo que realmente hacías: ${safeString(s.alibi.actual)}`);
     if (s.alibi.witnesses.length > 0) {
-      lines.push(`Posibles testigos: ${s.alibi.witnesses.join(", ")}`);
+      lines.push(`Posibles testigos: ${s.alibi.witnesses.map(safeString).join(", ")}`);
     }
   } else {
     lines.push("Tienes una coartada que ofreces cuando te preguntan dónde estabas.");
@@ -45,28 +53,28 @@ function buildSystemPrompt(c: GeneratedCase): string {
   lines.push("═══════════════════════════════════════════════════════════════════════");
   lines.push(CULPABILITY_STANCE[s.culpability]);
   lines.push("");
-  lines.push(`La situación: ${c.situation}`);
-  lines.push(`Lo que está en juego para ti: ${c.stakes}`);
+  lines.push(`La situación: ${safeString(c.situation)}`);
+  lines.push(`Lo que está en juego para ti: ${safeString(c.stakes)}`);
   lines.push("");
 
   lines.push("═══════════════════════════════════════════════════════════════════════");
   lines.push("LA VERDAD  (lo que sabes pero NUNCA ofreces voluntariamente)");
   lines.push("═══════════════════════════════════════════════════════════════════════");
-  lines.push(s.truth);
+  lines.push(safeString(s.truth));
   lines.push("");
 
   lines.push("═══════════════════════════════════════════════════════════════════════");
   lines.push("TUS MENTIRAS  (deflexiones específicas para preguntas específicas)");
   lines.push("═══════════════════════════════════════════════════════════════════════");
   for (const lie of s.lies) {
-    lines.push(`CUANDO PREGUNTEN SOBRE [${lie.topic}] (regex: /${lie.match}/i):`);
+    lines.push(`CUANDO PREGUNTEN SOBRE [${safeString(lie.topic)}] (regex: /${safeString(lie.match)}/i):`);
     lines.push(`  Elige UNA de estas variaciones (nunca repitas igual, nunca niegues dos veces de la misma forma):`);
     for (const v of lie.variations) {
-      lines.push(`  - "${v}"`);
+      lines.push(`  - "${safeString(v)}"`);
     }
     if (lie.underPressure) {
       lines.push(`  Si te presionan una tercera vez o te acorralan con prueba, se escapa la verdad:`);
-      lines.push(`  "${lie.underPressure}"`);
+      lines.push(`  "${safeString(lie.underPressure)}"`);
     }
     lines.push("");
   }
@@ -74,7 +82,7 @@ function buildSystemPrompt(c: GeneratedCase): string {
   lines.push("═══════════════════════════════════════════════════════════════════════");
   lines.push("PATRÓN DE HABLA");
   lines.push("═══════════════════════════════════════════════════════════════════════");
-  lines.push(s.demeanor);
+  lines.push(safeString(s.demeanor));
   lines.push("");
   lines.push("NUNCA USES: 'um', 'uh', 'o sea', 'tipo', 'bueno'. No tartamudeas.");
   lines.push("");
@@ -96,7 +104,7 @@ function buildSystemPrompt(c: GeneratedCase): string {
   lines.push("La mayoría de tus respuestas deben ser AFIRMACIONES, no preguntas. Solo contra-pregunta cuando el detective toque un tema sensible o estés ganando tiempo.");
   lines.push("Contra-preguntas disponibles (varíalas, nunca repitas textualmente):");
   for (const cq of s.counterQuestions) {
-    lines.push(`- "${cq}"`);
+    lines.push(`- "${safeString(cq)}"`);
   }
   lines.push("");
 
@@ -104,7 +112,7 @@ function buildSystemPrompt(c: GeneratedCase): string {
   lines.push("LÍNEA DE QUIEBRA");
   lines.push("═══════════════════════════════════════════════════════════════════════");
   lines.push(`Cuando finalmente rompes, dices (usa esto casi literal, solo en el nivel BREAKING):`);
-  lines.push(`"${s.breakingLine}"`);
+  lines.push(`"${safeString(s.breakingLine)}"`);
   lines.push("");
 
   lines.push("═══════════════════════════════════════════════════════════════════════");
@@ -143,12 +151,12 @@ function mapStressRules(rules: GeneratedCase["suspect"]["stressRules"]): StressR
 
 function mapEvidence(evidence: GeneratedCase["evidence"]): EvidenceItem[] {
   return evidence.map((e) => ({
-    id: e.id,
-    label: e.label,
-    description: e.description,
+    id: safeString(e.id),
+    label: safeString(e.label),
+    description: safeString(e.description),
     isRedHerring: e.isRedHerring ?? false,
     isLocked: !!e.unlockTopic,
-    unlockTopic: e.unlockTopic,
+    unlockTopic: e.unlockTopic ? safeString(e.unlockTopic) : undefined,
   }));
 }
 
@@ -166,14 +174,14 @@ export function adaptGeneratedCase(generated: GeneratedCase): CaseInfo {
   if (generated.timeline) {
     for (const te of generated.timeline) {
       if (te.isPublic) {
-        facts.push(`[${te.time}] ${te.event}`);
+        facts.push(safeString(`[${te.time}] ${te.event}`));
       }
     }
   }
 
   // Add alibi claim (what the suspect says, not what actually happened)
   if (s.alibi) {
-    facts.push(`Coartada declarada: ${s.alibi.claimed}`);
+    facts.push(safeString(`Coartada declarada: ${s.alibi.claimed}`));
   }
 
   // NOTE: Evidence is shown in the evidence board, NOT here.
@@ -182,35 +190,35 @@ export function adaptGeneratedCase(generated: GeneratedCase): CaseInfo {
 
   const suspect: Suspect = {
     id: `gen_${generated.seed}`,
-    name: s.name,
+    name: safeString(s.name),
     age: 0,
-    role: s.role,
-    avatar: s.avatar,
+    role: safeString(s.role),
+    avatar: safeString(s.avatar),
     baseline: { stress, confidence, hostility },
     isGuilty: s.culpability === "guilty" || s.culpability === "accomplice",
     slipChance: s.culpability === "guilty" ? 0.18 : s.culpability === "accomplice" ? 0.12 : 0.05,
     systemPrompt: buildSystemPrompt(generated),
-    caseBrief: generated.briefing,
+    caseBrief: safeString(generated.briefing),
     knownFacts: facts,
     stressRules: mapStressRules(s.stressRules),
   };
 
   return {
     id: `gen_${generated.seed}`,
-    title: `${generated.title} — SEMILLA ${generated.seed}`,
-    subtitle: `CASO GENERADO POR IA // ${generated.difficulty?.toUpperCase() ?? "MEDIO"}`,
-    briefing: generated.briefing,
+    title: safeString(`${generated.title} — SEMILLA ${generated.seed}`),
+    subtitle: `CASO GENERADO POR IA // ${safeString(generated.difficulty).toUpperCase() ?? "MEDIO"}`,
+    briefing: safeString(generated.briefing),
     date: new Date().toLocaleDateString("es-ES", {
       day: "numeric",
       month: "long",
       year: "numeric",
     }).toUpperCase(),
     location: "SALA DE INTERROGATORIO",
-    stakes: generated.stakes,
+    stakes: safeString(generated.stakes),
     suspect,
     evidence: mapEvidence(generated.evidence),
     timeline: generated.timeline ?? [],
-    difficulty: generated.difficulty ?? "medio",
+    difficulty: safeString(generated.difficulty ?? "medio"),
   };
 }
 
