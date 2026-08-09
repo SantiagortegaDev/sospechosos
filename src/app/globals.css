@@ -49,71 +49,77 @@
 
 :root {
   --radius: 0px;
-  --background: #0c0c0f;
-  --foreground: #d8d4c8;
-  --card: #14141a;
-  --card-foreground: #d4d0c4;
-  --popover: #14141a;
-  --popover-foreground: #d4d0c4;
+  /* Noir police palette — warm black, amber/sepia lamp, red file, blue logo */
+  --background: #1a1410;
+  --foreground: #e8dcc4;
+  --card: #241c16;
+  --card-foreground: #e8dcc4;
+  --popover: #241c16;
+  --popover-foreground: #e8dcc4;
   --primary: #5ba4e8;
-  --primary-foreground: #0c0c0f;
-  --accent: #1a1a22;
-  --accent-foreground: #5ba4e8;
-  --secondary: #18181f;
-  --secondary-foreground: #a09c90;
-  --muted: #18181f;
-  --muted-foreground: #5c584e;
-  --border: #2a2a33;
-  --input: #1e1e26;
-  --ring: #5ba4e8;
-  --destructive: #e83838;
-  --chart-1: #5ba4e8;
-  --chart-2: #4ec9b0;
-  --chart-3: #e84848;
-  --chart-4: #7a7af0;
-  --chart-5: #888870;
-  --sidebar: #0e0e13;
-  --sidebar-foreground: #c8c4b8;
+  --primary-foreground: #1a1410;
+  --accent: #3a2a1a;
+  --accent-foreground: #f0a830;
+  --secondary: #2e2418;
+  --secondary-foreground: #c8b890;
+  --muted: #2e2418;
+  --muted-foreground: #8a7a5c;
+  --border: #4a3a28;
+  --input: #2e2418;
+  --ring: #f0a830;
+  --destructive: #c93838;
+  --chart-1: #f0a830;
+  --chart-2: #c9a050;
+  --chart-3: #c93838;
+  --chart-4: #8a6a3a;
+  --chart-5: #6a5a3a;
+  --sidebar: #1a1410;
+  --sidebar-foreground: #e8dcc4;
   --sidebar-primary: #5ba4e8;
-  --sidebar-primary-foreground: #0c0c0f;
-  --sidebar-accent: #1a1a22;
-  --sidebar-accent-foreground: #5ba4e8;
-  --sidebar-border: #2a2a33;
-  --sidebar-ring: #5ba4e8;
+  --sidebar-primary-foreground: #1a1410;
+  --sidebar-accent: #3a2a1a;
+  --sidebar-accent-foreground: #f0a830;
+  --sidebar-border: #4a3a28;
+  --sidebar-ring: #f0a830;
+  /* Amber lamp glow for accents */
+  --amber: #f0a830;
+  --amber-dim: #c98820;
+  --sepia: #c8b890;
+  --file-red: #c93838;
 }
 
 .dark {
-  --background: #0c0c0f;
-  --foreground: #d8d4c8;
-  --card: #14141a;
-  --card-foreground: #d4d0c4;
-  --popover: #14141a;
-  --popover-foreground: #d4d0c4;
+  --background: #1a1410;
+  --foreground: #e8dcc4;
+  --card: #241c16;
+  --card-foreground: #e8dcc4;
+  --popover: #241c16;
+  --popover-foreground: #e8dcc4;
   --primary: #5ba4e8;
-  --primary-foreground: #0c0c0f;
-  --secondary: #18181f;
-  --secondary-foreground: #a09c90;
-  --muted: #18181f;
-  --muted-foreground: #5c584e;
-  --accent: #1a1a22;
-  --accent-foreground: #5ba4e8;
-  --destructive: #e83838;
-  --border: #2a2a33;
-  --input: #1e1e26;
-  --ring: #5ba4e8;
-  --chart-1: #5ba4e8;
-  --chart-2: #4ec9b0;
-  --chart-3: #e84848;
-  --chart-4: #7a7af0;
-  --chart-5: #888870;
-  --sidebar: #0e0e13;
-  --sidebar-foreground: #c8c4b8;
+  --primary-foreground: #1a1410;
+  --secondary: #2e2418;
+  --secondary-foreground: #c8b890;
+  --muted: #2e2418;
+  --muted-foreground: #8a7a5c;
+  --accent: #3a2a1a;
+  --accent-foreground: #f0a830;
+  --destructive: #c93838;
+  --border: #4a3a28;
+  --input: #2e2418;
+  --ring: #f0a830;
+  --chart-1: #f0a830;
+  --chart-2: #c9a050;
+  --chart-3: #c93838;
+  --chart-4: #8a6a3a;
+  --chart-5: #6a5a3a;
+  --sidebar: #1a1410;
+  --sidebar-foreground: #e8dcc4;
   --sidebar-primary: #5ba4e8;
-  --sidebar-primary-foreground: #0c0c0f;
-  --sidebar-accent: #1a1a22;
-  --sidebar-accent-foreground: #5ba4e8;
-  --sidebar-border: #2a2a33;
-  --sidebar-ring: #5ba4e8;
+  --sidebar-primary-foreground: #1a1410;
+  --sidebar-accent: #3a2a1a;
+  --sidebar-accent-foreground: #f0a830;
+  --sidebar-border: #4a3a28;
+  --sidebar-ring: #f0a830;
 }
 
 @layer base {
@@ -123,16 +129,18 @@
   html, body {
     @apply text-foreground;
     font-size: 16px;
+    /* Noir interrogation room: warm black base + amber overhead lamp glow
+       + vignette. The radial gradient at top simulates a hanging lamp. */
     background:
-      radial-gradient(ellipse at center, transparent 0%, transparent 45%, rgba(0, 0, 0, 0.55) 100%),
+      radial-gradient(ellipse 60% 50% at 50% 0%, rgba(240, 168, 48, 0.12) 0%, transparent 60%),
+      radial-gradient(ellipse at center, transparent 0%, transparent 45%, rgba(0, 0, 0, 0.6) 100%),
       linear-gradient(to bottom,
-        #050508 0%,
-        #0a0a12 35%,
-        #0d1424 65%,
-        #142848 85%,
-        #1c3a6e 100%
+        #1a1410 0%,
+        #1f1812 30%,
+        #1a1410 60%,
+        #14100c 100%
       ),
-      #050508;
+      #1a1410;
     background-attachment: fixed;
     image-rendering: pixelated;
     min-height: 100vh;
@@ -142,9 +150,10 @@
     content: "";
     position: fixed;
     inset: 0;
+    /* Subtle sepia grid overlay — like a case file texture */
     background-image:
-      linear-gradient(rgba(80, 140, 200, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(80, 140, 200, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(200, 184, 144, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(200, 184, 144, 0.025) 1px, transparent 1px);
     background-size: 24px 24px;
     pointer-events: none;
     z-index: 1;
@@ -156,6 +165,7 @@
     inset: 0;
     pointer-events: none;
     z-index: 9999;
+    /* Scanlines — slightly warmer to match the noir palette */
     background-image: repeating-linear-gradient(
       0deg,
       rgba(0, 0, 0, 0.08) 0px,
@@ -477,6 +487,18 @@
 }
 .pixel-breathe {
   animation: pixel-breathe 2.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Scroll-down arrow animation — bouncing pixel arrows to signal "there's
+   more content below, scroll down". Used at the bottom of long screens
+   (vote, verdict) when the action button might be below the fold. */
+@keyframes pixel-arrow-bounce {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(6px); opacity: 1; }
+}
+.pixel-scroll-arrow {
+  animation: pixel-arrow-bounce 1.2s ease-in-out infinite;
   will-change: transform, opacity;
 }
 

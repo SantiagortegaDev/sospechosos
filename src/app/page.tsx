@@ -276,7 +276,7 @@ export default function Home() {
   /* Right panel & mobile tabs */
   const [rightTab, setRightTab] = useState<
     "expediente" | "evidencia" | "notas" | "timeline" | "detectives" | "herramientas"
-  >("expediente");
+  >("evidencia");
   const [mobileTab, setMobileTab] = useState<
     "chat" | "sospechoso" | "panel"
   >("chat");
@@ -453,6 +453,12 @@ export default function Home() {
           if (seenMsgIds.current.has(msgId)) return;
           seenMsgIds.current.add(msgId);
           setChatMessages((prev) => [...prev.slice(-80), gameMsg]);
+          // When a suspect.answer arrives, the suspect is no longer
+          // responding — reset the typing indicator. This is a safety net
+          // in case the suspect.idle broadcast was lost.
+          if (type === "suspect.answer") {
+            setSuspectResponding(false);
+          }
         }
 
         if (type === "stress.update") {
@@ -735,8 +741,11 @@ export default function Home() {
     setTutorialChecked(true);
     const urlCode = getRoomCodeFromURL();
     if (urlCode) { setRoomCode(urlCode); setPhase("join_by_link"); return; }
-    const saved = loadSession();
-    if (saved) { setSession(saved); setRoomCode(saved.roomCode); setUsername(saved.username); setPhase("lobby"); return; }
+    // Don't restore the saved session on page load — always start at the
+    // welcome screen. The previous behavior (restoring to lobby) caused
+    // confusion when the host reloaded mid-game and landed in a stale lobby.
+    // Clear any saved session so it doesn't linger.
+    clearSession();
     const seen = localStorage.getItem(TUTORIAL_KEY);
     if (!seen) setShowTutorial(true);
   }, [tutorialChecked]);
@@ -2100,10 +2109,10 @@ export default function Home() {
                 key={tab.key}
                 onClick={() => { setRightTab(tab.key); SFX.soundTab(); if (tab.key === "detectives") setDetectiveUnreadCount(0); }}
                 className={cn(
-                  "px-2.5 py-2 text-[12px] tracking-wider transition-all cursor-pointer",
+                  "px-2.5 py-2 text-[12px] tracking-wider transition-all cursor-pointer border-b-2",
                   rightTab === tab.key
-                    ? "text-[var(--primary)] border-b-2 border-[var(--primary)] bg-[var(--primary)]/8"
-                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                    ? "text-[var(--amber)] border-[var(--amber)] bg-[var(--amber)]/15 font-bold"
+                    : "text-[var(--muted-foreground)] border-transparent hover:text-[var(--foreground)] hover:bg-[var(--accent)]/50"
                 )}
                 style={bodyFont}
               >
@@ -2681,7 +2690,7 @@ export default function Home() {
             </div>
             <div className="pixel-frame p-2 text-center">
               <div className="text-[12px] text-[var(--muted-foreground)] tracking-wider">EVIDENCIA</div>
-              <div className="text-lg font-bold text-[var(--primary)]">{unlockedEvidence.length}/{evidenceItems.length}</div>
+              <div className="text-lg font-bold text-[var(--primary)]">{unlockedEvidence.length}</div>
             </div>
           </div>
 
@@ -2734,6 +2743,7 @@ export default function Home() {
                 <button onClick={() => { SFX.soundClick(); setVoteChoice("innocent"); }} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "innocent" ? "border-[#4ec9b0] bg-[#4ec9b0]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[#4ec9b0]")}><div className="text-2xl">🕊</div><div className="text-sm font-bold tracking-widest mt-2 text-[#4ec9b0]" style={headFont}>INOCENTE</div><div className="text-[12px] text-[var(--muted-foreground)] mt-1">Queda libre</div></button>
               </div>
               <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">RAZÓN DE TU VOTO</label><textarea value={voteReason} onChange={(e) => setVoteReason(e.target.value)} className="pixel-input w-full min-h-[80px] resize-none text-xs" placeholder="¿Por qué? Basa tu respuesta en la evidencia..." /></div>
+              <div className="text-center pixel-scroll-arrow text-[var(--amber)] text-lg">▼</div>
               <button onClick={() => { SFX.soundVerdict(); handleSubmitVote(); }} disabled={!voteChoice} className={cn("w-full py-3 text-xs tracking-widest font-bold cursor-pointer", voteChoice ? (voteChoice === "guilty" ? "pixel-btn-danger" : "pixel-btn") : "pixel-btn-secondary opacity-30")} style={headFont}>REGISTRAR VOTO</button>
             </div>
           )}
