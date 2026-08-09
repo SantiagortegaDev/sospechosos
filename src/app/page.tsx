@@ -188,7 +188,7 @@ export default function Home() {
   const [difficulty, setDifficulty] = useState<"facil" | "normal" | "dificil">("normal");
   const [crimeTheme, setCrimeTheme] = useState<"random" | "fraude" | "robo" | "asesinato" | "sabotaje">("random");
   const [aiVoice, setAiVoice] = useState<"on" | "off">("off");
-  const [musicEnabled, setMusicEnabled] = useState<"on" | "off">("off");
+  const [musicEnabled, setMusicEnabled] = useState<"on" | "off">("on");
   const [sfxEnabled, setSfxEnabled] = useState<"on" | "off">("on");
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [lobbyPlayers, setLobbyPlayers] = useState<
