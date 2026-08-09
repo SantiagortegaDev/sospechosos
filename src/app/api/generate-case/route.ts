@@ -89,7 +89,17 @@ export async function POST(req: Request) {
     return NextResponse.json(cached);
   }
 
-  const systemPrompt = SYSTEM_PROMPT.replace("%SEED%", seed);
+  /* Derive a deterministic-but-varied culpability hint from the seed so
+   * the LLM doesn't default to "guilty" every time. Hash the seed and
+   * pick one of the 4 culpability values. The LLM still has creative
+   * freedom, but the prompt strongly nudges it toward this value so
+   * the distribution across games is roughly even. */
+  const culpabilityHash = Array.from(seed).reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) | 0, 7);
+  const culpabilityOptions = ["guilty", "innocent", "accomplice", "witness"] as const;
+  const forcedCulpability = culpabilityOptions[Math.abs(culpabilityHash) % 4];
+  const culpabilityHint = `\n- CULPABILIDAD OBLIGATORIA para este caso: el sospechoso DEBE ser "${forcedCulpability}". NO cambies este valor. Si es "innocent", el sospechoso NO cometió el crimen (pero puede tener secretos). Si es "witness", solo vio algo. Si es "accomplice", ayudó pero no planeó.`;
+
+  const systemPrompt = SYSTEM_PROMPT.replace("%SEED%", seed) + culpabilityHint;
 
   try {
     const raw = await generateCaseFromSeed(systemPrompt, seed);

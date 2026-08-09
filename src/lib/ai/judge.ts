@@ -96,9 +96,15 @@ Devuelve tu veredicto como JSON.`;
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       return {
-        majorityCorrect: Boolean(parsed.majorityCorrect),
+        // majorityCorrect is ALWAYS computed deterministically from the
+        // vote vs the actual guilt — never trusted to the LLM. The LLM
+        // would just echo back what we tell it in the prompt ("Los
+        // detectives acertaron/se equivocaron"), which made every game
+        // feel like the detectives always won.
+        majorityCorrect,
         suspectIsGuilty: actualGuilty,
-        decision: parsed.decision === "freed" ? "freed" : "imprisoned",
+        // decision is also deterministic — based on the vote majority.
+        decision,
         guiltyVotes: guiltyCount,
         innocentVotes: innocentCount,
         judgeReasoning: forceStr(parsed.judgeReasoning) || "La corte ha tomado su decisión.",

@@ -289,6 +289,12 @@ export default function Home() {
   const [voteChoice, setVoteChoice] = useState<"guilty" | "innocent" | "">("");
   const [voteReason, setVoteReason] = useState("");
   const [allVotesIn, setAllVotesIn] = useState(false);
+  /* Frozen at the moment we enter the vote phase. lobbyPlayers can change
+   * mid-game (e.g. the second detective's lobby.join arrives late), which
+   * used to make requiredVotes jump from 1 to 2 AFTER the first vote was
+   * already cast — leaving the game stuck in "Esperando al otro detective..."
+   * forever. Freezing prevents that. */
+  const [frozenRequiredVotes, setFrozenRequiredVotes] = useState(1);
 
   /* Verdict & results */
   const [verdict, setVerdict] = useState<{
@@ -329,10 +335,12 @@ export default function Home() {
   const evidenceReviewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const nervousnessRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const phaseRef = useRef<GamePhase>(phase);
+  const lobbyPlayersRef = useRef(lobbyPlayers);
   const seenMsgIds = useRef<Set<string>>(new Set());
   const interrogatingRef = useRef(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { lobbyPlayersRef.current = lobbyPlayers; }, [lobbyPlayers]);
 
   const channels = session ? channelIdsFor(session.roomCode) : null;
 
@@ -698,7 +706,14 @@ export default function Home() {
     if (phase !== "deliberation" || delibTimeRemaining <= 0) return;
     delibTimerRef.current = setInterval(() => {
       setDelibTimeRemaining((prev) => {
-        if (prev <= 1) { if (delibTimerRef.current) clearInterval(delibTimerRef.current); setPhase("vote"); return 0; }
+        if (prev <= 1) {
+          if (delibTimerRef.current) clearInterval(delibTimerRef.current);
+          // Freeze the required vote count when the deliberation timer
+          // expires and we auto-transition to the vote phase.
+          setFrozenRequiredVotes(Math.max(1, lobbyPlayersRef.current));
+          setPhase("vote");
+          return 0;
+        }
         return prev - 1;
       });
     }, 1000);
@@ -781,8 +796,9 @@ export default function Home() {
     return () => { clearTimeout(firstTimeout); clearInterval(tickInterval); };
   }, [phase, currentCase, channels, sendGame, stress.stress]);
 
-  /* Check all votes in — solo player proceeds immediately */
-  const requiredVotes = Math.max(1, lobbyPlayers.length);
+  /* Check all votes in — uses frozenRequiredVotes (captured at vote-phase
+   * entry) so late-arriving lobby.join messages don't deadlock the vote. */
+  const requiredVotes = frozenRequiredVotes;
   useEffect(() => {
     if (votes.length >= requiredVotes && !allVotesIn) { setAllVotesIn(true); setTimeout(() => callJudge(), 1500); }
   }, [votes.length, allVotesIn, callJudge, requiredVotes]);
@@ -1017,20 +1033,6 @@ export default function Home() {
     } finally { setPending(false); interrogatingRef.current = false; }
   }, [chatDraft, pending, currentCase, session, playerId, conversationHistory, stress, sendGame, maxStress, questionsAsked, unlockAchievement, selectedEvidence, technique]);
 
-  // Form-submit handler — uses chatDraft (the input field value).
-  const handleInterrogate = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = chatDraft.trim();
-    if (!text) return;
-    // In multiplayer mode, the form's submit button PROPOSES instead of
-    // sending directly. The actual send happens after approval.
-    if (isMultiplayer) {
-      handleProposeQuestion();
-      return;
-    }
-    runInterrogation(text);
-  }, [chatDraft, isMultiplayer, handleProposeQuestion, runInterrogation]);
-
   const handleProposeQuestion = useCallback(() => {
     const text = chatDraft.trim();
     if (!text || !session) return;
@@ -1057,6 +1059,22 @@ export default function Home() {
       });
     } catch { /* ignore */ }
   }, [chatDraft, session, playerId, isMultiplayer, sendGame, runInterrogation]);
+
+  // Form-submit handler — uses chatDraft (the input field value).
+  // NOTE: handleProposeQuestion is defined above to avoid a TDZ
+  // (temporal dead zone) ReferenceError at build time.
+  const handleInterrogate = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = chatDraft.trim();
+    if (!text) return;
+    // In multiplayer mode, the form's submit button PROPOSES instead of
+    // sending directly. The actual send happens after approval.
+    if (isMultiplayer) {
+      handleProposeQuestion();
+      return;
+    }
+    runInterrogation(text);
+  }, [chatDraft, isMultiplayer, handleProposeQuestion, runInterrogation]);
 
   const handleApproveProposal = useCallback(() => {
     if (turnState.status !== "reviewing" || !turnState.proposedText) return;
@@ -1120,7 +1138,13 @@ export default function Home() {
     setTimelineEntries((prev) => [...prev, { id: `tl_${Date.now()}`, label, description: desc, addedBy: playerId, addedByName: username || "Detective", createdAt: Date.now() }]);
   };
 
-  const skipToVote = useCallback(() => { if (delibTimerRef.current) clearInterval(delibTimerRef.current); setPhase("vote"); }, []);
+  const skipToVote = useCallback(() => {
+    if (delibTimerRef.current) clearInterval(delibTimerRef.current);
+    // Freeze the required vote count at this moment so late lobby.join
+    // broadcasts don't change the threshold mid-vote.
+    setFrozenRequiredVotes(Math.max(1, lobbyPlayers.length));
+    setPhase("vote");
+  }, [lobbyPlayers.length]);
 
   const handleSubmitVote = useCallback(async () => {
     if (!voteChoice || !session) return;
@@ -1997,13 +2021,13 @@ export default function Home() {
     return (
       <div className="min-h-screen flex flex-col pixel-fade-in" style={bodyFont}>
         {AchievementOverlay}
-        <header className="border-b border-[var(--border)] bg-[var(--card)] px-4 py-2 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-4">
-            <span className="text-[var(--primary)] pixel-live-dot" />
-            <span className="text-sm tracking-wider text-[var(--foreground)] font-bold">INTERROGACION</span>
-            <span className="pixel-badge text-xs">PREGUNTAS: {questionsAsked}</span>
+        <header className="border-b border-[var(--border)] bg-[var(--card)] px-2 sm:px-4 py-2 flex items-center justify-between shrink-0 gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <span className="text-[var(--primary)] pixel-live-dot shrink-0" />
+            <span className="hidden sm:inline text-sm tracking-wider text-[var(--foreground)] font-bold">INTERROGACION</span>
+            <span className="hidden sm:inline pixel-badge text-xs">PREGUNTAS: {questionsAsked}</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 sm:gap-4 shrink-0">
             <span className={cn("text-sm font-bold", timeRemaining <= 60 ? "text-[var(--destructive)] pixel-timer-warning" : "text-[var(--primary)]")} style={headFont}>{formatTime(timeRemaining)}</span>
             <div className="flex items-center gap-1">
               <button onClick={() => { SFX.soundClick(); const m = SFX.toggleSfxMuted(); setMutedState(m); }} className="pixel-btn-secondary text-[10px] py-1 px-2" title="Efectos de sonido">
@@ -2016,7 +2040,7 @@ export default function Home() {
                 {aiVoice === "on" ? "VOZ" : "VOZ—"}
               </button>
             </div>
-            <button onClick={() => { SFX.soundClick(); enterDeliberation(); }} className="pixel-btn-danger text-xs py-1 px-3">DELIBERAR</button>
+            <button onClick={() => { SFX.soundClick(); enterDeliberation(); }} className="pixel-btn-danger text-[10px] sm:text-xs py-1 px-2 sm:px-3">DELIBERAR</button>
           </div>
         </header>
 
@@ -2272,8 +2296,9 @@ export default function Home() {
             <div className="text-xs text-[var(--muted-foreground)] mt-1">Tu voto es definitivo. Revisa tu evidencia antes de decidir.</div>
           </div>
 
-          {/* Evidence + stats summary so detectives can make an informed vote */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {/* Evidence + stats summary so detectives can make an informed vote.
+              Hidden on mobile to keep the vote screen focused. */}
+          <div className="hidden md:grid grid-cols-4 gap-2">
             <div className="pixel-frame p-2 text-center">
               <div className="text-[12px] text-[var(--muted-foreground)] tracking-wider">PREGUNTAS</div>
               <div className="text-lg font-bold text-[var(--primary)]">{questionsAsked}</div>
@@ -2328,7 +2353,11 @@ export default function Home() {
                 <div className="text-2xl mt-2">{voteChoice === "guilty" ? "⚖" : "🕊"}</div>
                 <div className={cn("text-sm font-bold tracking-widest mt-1", voteChoice === "guilty" ? "text-[var(--destructive)]" : "text-[#4ec9b0]")} style={headFont}>{voteChoice === "guilty" ? "CULPABLE" : "INOCENTE"}</div>
               </div>
-              <div className="text-xs text-[var(--muted-foreground)] animate-pulse tracking-widest">{lobbyPlayers.length <= 1 ? "Procesando tu voto..." : `Esperando al otro detective... (${votes.length}/${requiredVotes})`}</div>
+              <div className="text-xs text-[var(--muted-foreground)] animate-pulse tracking-widest">
+                {requiredVotes <= 1
+                  ? "Procesando tu voto... la jueza deliberará en breve."
+                  : `Esperando al otro detective... (${votes.length}/${requiredVotes})`}
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
