@@ -261,6 +261,9 @@ export default function Home() {
   const [otherTyping, setOtherTyping] = useState(false);
   const [suspectResponding, setSuspectResponding] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* Separate ref for throttling our OWN typing broadcasts (sender side).
+   * typingTimeoutRef above is used by the receiver to reset otherTyping. */
+  const typingBroadcastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [detectiveUnreadCount, setDetectiveUnreadCount] = useState(0);
 
   /* Evidence */
@@ -448,13 +451,6 @@ export default function Home() {
           const gameMsg = payload as GameMessage;
           const msgId = `${gameMsg.senderId}-${gameMsg.timestamp}`;
           if (seenMsgIds.current.has(msgId)) return;
-          // Skip echo: if this is a suspect.answer that we already added locally,
-          // don't add it again. The local handleInterrogate already adds it.
-          if (type === "suspect.answer" && currentCase && gameMsg.senderId === currentCase.suspect.id) {
-            // Check if we already have this exact answer text recently
-            seenMsgIds.current.add(msgId);
-            return;
-          }
           seenMsgIds.current.add(msgId);
           setChatMessages((prev) => [...prev.slice(-80), gameMsg]);
         }
@@ -1191,6 +1187,11 @@ export default function Home() {
 
       const answerText = data.answer?.text || "No tengo nada que decir.";
       const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: answerText, timestamp: Date.now(), flagged: data.answer?.flagged };
+      // Mark this message as seen locally so the retry broadcasts from
+      // our own sendGame don't create duplicates. The OTHER detective
+      // doesn't have this msgId in their seenMsgIds, so they WILL add it.
+      const aMsgId = `${aMsg.senderId}-${aMsg.timestamp}`;
+      seenMsgIds.current.add(aMsgId);
       setChatMessages((prev) => [...prev.slice(-80), aMsg]);
       // Broadcast suspect.answer with retry — the other detective MUST see
       // the response, so we send it multiple times to survive packet loss.
@@ -2189,22 +2190,23 @@ export default function Home() {
                   ))}
                   {detectiveMessages.length === 0 && <div className="text-xs text-[var(--muted-foreground)] italic text-center py-4">Sin mensajes privados</div>}
                 </div>
-                <form onSubmit={handleSendDetective} className="flex gap-1 shrink-0">
+                <form onSubmit={handleSendDetective} className="flex gap-2 shrink-0 items-stretch">
                   <input
                     value={detectiveDraft}
                     onChange={(e) => {
                       setDetectiveDraft(e.target.value);
-                      // Broadcast typing indicator (throttled by 500ms).
+                      // Broadcast typing indicator (throttled by 1.5s).
                       try {
-                        if (!typingTimeoutRef.current) {
+                        if (!typingBroadcastRef.current) {
                           sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId } });
+                          typingBroadcastRef.current = setTimeout(() => { typingBroadcastRef.current = null; }, 1500);
                         }
                       } catch { /* ignore */ }
                     }}
-                    className="pixel-input flex-1 text-xs"
-                    placeholder="Mensaje privado al otro detective..."
+                    className="pixel-input flex-1 text-xs min-w-0"
+                    placeholder="Mensaje al otro detective..."
                   />
-                  <button type="submit" className="pixel-btn text-xs px-3 py-2">ENVIAR</button>
+                  <button type="submit" className="pixel-btn text-xs px-3 py-2 shrink-0 self-stretch">ENVIAR</button>
                 </form>
               </div>
             )}
@@ -2282,14 +2284,14 @@ export default function Home() {
         </div>
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-          {/* LEFT: Suspect panel */}
-          <aside className="hidden md:flex flex-col w-52 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
+          {/* LEFT: Suspect panel — wider so the portrait + telemetry fill the space */}
+          <aside className="hidden md:flex flex-col w-64 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
             <div className="pixel-header"><span>SOSPECHOSO</span></div>
             <div className="p-3 space-y-3 flex-1 overflow-y-auto pixel-scroll">
-              {/* Portrait + identity card */}
+              {/* Portrait + identity card — bigger portrait to fill space */}
               <div className="text-center">
                 <div className={cn("flex justify-center mb-3", portraitShake && "pixel-portrait-shake")} style={{ filter: portraitTint }}>
-                  <SuspectPortrait seed={currentCase?.id?.replace("gen_", "") ?? "default"} gender={recallGender(currentCase?.id?.replace("gen_", "") ?? "default")} avatar={suspect.avatar} size="lg" />
+                  <SuspectPortrait seed={currentCase?.id?.replace("gen_", "") ?? "default"} gender={recallGender(currentCase?.id?.replace("gen_", "") ?? "default")} avatar={suspect.avatar} size="xl" />
                 </div>
                 <div className="text-base font-bold text-[var(--primary)] tracking-wider" style={headFont}>{safeRender(suspect.name)}</div>
                 <div className="text-xs text-[var(--muted-foreground)] mt-1">{suspect.age ? `${suspect.age} años · ` : ""}{safeRender(suspect.role)}</div>
@@ -2337,12 +2339,13 @@ export default function Home() {
             </div>
           </aside>
 
-          {/* CENTER: Chat */}
-          <section className={cn("flex-1 flex flex-col min-h-0", mobileTab !== "chat" && "hidden md:flex")}>
-            <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2 pixel-chat-compact">
+          {/* CENTER: Chat — constrained width so messages don't stretch */}
+          <section className={cn("flex-1 flex flex-col min-h-0 bg-[var(--background)]", mobileTab !== "chat" && "hidden md:flex")}>
+            <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2 pixel-chat-compact max-w-3xl mx-auto w-full">
               {chatMessages.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full text-center space-y-3 pixel-fade-in">
-                  <div className="text-xs text-[var(--muted-foreground)]">El sospechoso espera en la sala de interrogacion.</div>
+                <div className="flex flex-col items-center justify-center h-full text-center space-y-3 pixel-fade-in py-8">
+                  <div className="text-3xl mb-2 opacity-50">{safeRender(suspect.avatar)}</div>
+                  <div className="text-xs text-[var(--muted-foreground)]">El sospechoso espera en la sala de interrogación.</div>
                   <div className="text-xs text-[var(--primary)]">Formula tu primera pregunta para comenzar.</div>
                 </div>
               )}
@@ -2373,7 +2376,19 @@ export default function Home() {
                   </div>
                 );
               })}
-              {(pending || suspectResponding) && <div className="flex justify-end"><div className="pixel-frame p-2.5 text-xs text-[var(--muted-foreground)]"><TypingIndicator label="El sospechoso está respondiendo" /></div></div>}
+              {(pending || suspectResponding) && (
+                <div className="flex justify-end">
+                  <div className="max-w-[80%] pixel-message-in">
+                    <div className="text-[13px] text-[var(--muted-foreground)] tracking-wider mb-1 text-right flex items-center justify-end gap-2">
+                      <span className="pixel-badge">SOSPECHOSO</span>
+                      <span className="text-[var(--primary)]">escribiendo...</span>
+                    </div>
+                    <div className="pixel-frame p-2.5 text-sm text-[var(--muted-foreground)] border-r-2 border-r-[#2a2a44]">
+                      <TypingIndicator />
+                    </div>
+                  </div>
+                </div>
+              )}
               <div ref={chatEndRef} />
             </div>
             {/* PROPOSAL REVIEW UI — shown when the other detective proposed a question */}
@@ -2398,10 +2413,28 @@ export default function Home() {
                 )}
               </div>
             )}
-            <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-2 flex gap-2 shrink-0">
-              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-xs text-[var(--destructive)]">📎 {safeRender(selectedEvidence.label)}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
-              <input ref={chatInputRef} value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta al sospechoso...` : isMultiplayer ? "Propón una pregunta..." : "Pregunta al sospechoso..."} disabled={pending || turnState.status === "reviewing"} />
-              <button type="submit" disabled={pending || !chatDraft.trim() || turnState.status === "reviewing"} className="pixel-btn text-xs px-4">{pending ? "..." : isMultiplayer ? "PROPONER" : "ENVIAR"}</button>
+            {/* Typing indicator — shows when the other detective is writing a question */}
+            {isMultiplayer && otherTyping && turnState.status !== "reviewing" && (
+              <div className="px-3 py-1 border-t border-[var(--border)] bg-[var(--card)] text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-2 shrink-0">
+                <TypingIndicator />
+                <span>El otro detective está escribiendo...</span>
+              </div>
+            )}
+            <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-2 flex gap-2 shrink-0 items-stretch">
+              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10 shrink-0"><span className="text-xs text-[var(--destructive)] whitespace-nowrap">📎 {safeRender(selectedEvidence.label)}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
+              <input ref={chatInputRef} value={chatDraft} onChange={(e) => {
+                setChatDraft(e.target.value);
+                // Broadcast typing indicator to the other detective (throttled).
+                if (isMultiplayer) {
+                  try {
+                    if (!typingBroadcastRef.current) {
+                      sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId } });
+                      typingBroadcastRef.current = setTimeout(() => { typingBroadcastRef.current = null; }, 1500);
+                    }
+                  } catch { /* ignore */ }
+                }
+              }} className="pixel-input flex-1 text-xs min-w-0" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta...` : isMultiplayer ? "Propón una pregunta..." : "Pregunta al sospechoso..."} disabled={pending || turnState.status === "reviewing"} />
+              <button type="submit" disabled={pending || !chatDraft.trim() || turnState.status === "reviewing"} className="pixel-btn text-xs px-3 sm:px-4 shrink-0 self-stretch">{pending ? "..." : isMultiplayer ? "PROPONER" : "ENVIAR"}</button>
             </form>
           </section>
 
