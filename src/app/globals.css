@@ -50,7 +50,7 @@
 :root {
   --radius: 0px;
   --background: #0c0c0f;
-  --foreground: #c8c4b8;
+  --foreground: #d8d4c8;
   --card: #14141a;
   --card-foreground: #d4d0c4;
   --popover: #14141a;
@@ -84,7 +84,7 @@
 
 .dark {
   --background: #0c0c0f;
-  --foreground: #c8c4b8;
+  --foreground: #d8d4c8;
   --card: #14141a;
   --card-foreground: #d4d0c4;
   --popover: #14141a;
@@ -951,23 +951,23 @@
 
 /* ═══ Compact Chat Styles ═══ */
 .pixel-chat-compact {
-  font-size: 0.6rem;
-  line-height: 1.25;
-  gap: 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  gap: 0.5rem;
 }
 .pixel-chat-compact .pixel-frame {
-  padding: 0.25rem 0.4rem;
+  padding: 0.5rem 0.65rem;
   border-width: 1px;
 }
 .pixel-chat-compact [class*="text-9px"],
 .pixel-chat-compact [class*="text-\\[9px\\]"] {
-  font-size: 0.5rem;
+  font-size: 0.65rem;
 }
 .pixel-chat-compact [class*="text-xs"] {
-  font-size: 0.55rem;
+  font-size: 0.7rem;
 }
 .pixel-chat-compact .max-w-\\[80\\%\\] {
-  max-width: 70%;
+  max-width: 75%;
 }
 
 /* ═══ Cleaner button style without corners ═══ */

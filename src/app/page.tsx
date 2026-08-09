@@ -1488,9 +1488,9 @@ export default function Home() {
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* LEFT: Suspect panel */}
-          <aside className="hidden md:flex flex-col w-64 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
+          <aside className="hidden md:flex flex-col w-56 border-r-2 border-[var(--border)] bg-[var(--card)] shrink-0">
             <div className="pixel-header"><span>SOSPECHOSO</span></div>
-            <div className="p-5 space-y-5 flex-1 overflow-y-auto pixel-scroll">
+            <div className="p-3 space-y-3 flex-1 overflow-y-auto pixel-scroll">
               {/* Portrait + identity card */}
               <div className="text-center">
                 <div className={cn("flex justify-center mb-3", portraitShake && "pixel-portrait-shake")} style={{ filter: portraitTint }}>
@@ -1557,20 +1557,20 @@ export default function Home() {
                 const isSystem = msg.senderType === "system";
                 return (
                   <div key={`chat-${i}`} className={cn("flex flex-col", isDetective ? "items-start" : "items-end", isSystem && "items-center")}>
-                    {isSystem && <div className="text-[9px] text-[var(--muted-foreground)] italic text-center px-4 py-1 border border-[var(--border)] bg-[var(--accent)]">{msg.text}</div>}
+                    {isSystem && <div className="text-[10px] text-[var(--muted-foreground)] italic text-center px-4 py-1.5 border border-[var(--border)] bg-[var(--accent)]">{msg.text}</div>}
                     {isDetective && !isSystem && (
                       <div className="max-w-[80%]">
-                        <div className="text-[9px] text-[var(--primary)] tracking-wider mb-0.5">[Detective {msg.senderName} pregunta]</div>
-                        <div className="pixel-frame p-2.5 text-xs text-[var(--foreground)] border-l-2 border-l-[var(--primary)]">{msg.text}</div>
+                        <div className="text-[10px] text-[var(--primary)] tracking-wider mb-1">[Detective {msg.senderName} pregunta]</div>
+                        <div className="pixel-frame p-2.5 text-sm text-[var(--foreground)] border-l-2 border-l-[var(--primary)]">{msg.text}</div>
                       </div>
                     )}
                     {msg.senderType === "suspect" && (
                       <div className="max-w-[80%] pixel-message-in">
-                        <div className="text-[9px] text-[var(--muted-foreground)] tracking-wider mb-0.5 text-right flex items-center justify-end gap-2">
+                        <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider mb-1 text-right flex items-center justify-end gap-2">
                           <span className="pixel-badge">SOSPECHOSO</span>
                           <span>[{msg.senderName || "SOSPECHOSO"}]</span>
                         </div>
-                        <div className={cn("pixel-frame p-2.5 text-xs", msg.type === "suspect.autonomous" ? "text-[var(--muted-foreground)] italic border-r-2 border-r-[var(--border)]" : "text-[var(--foreground)] border-r-2 border-r-[#2a2a44]")}>
+                        <div className={cn("pixel-frame p-2.5 text-sm", msg.type === "suspect.autonomous" ? "text-[var(--muted-foreground)] italic border-r-2 border-r-[var(--border)]" : "text-[var(--foreground)] border-r-2 border-r-[#2a2a44]")}>
                           {msg.type === "suspect.autonomous" && <span className="text-[8px] text-[var(--muted-foreground)] tracking-wider block mb-1">*pensamiento autónomo*</span>}
                           <TypewriterText text={msg.text} speed={22} />
                         </div>
@@ -1582,7 +1582,7 @@ export default function Home() {
               {pending && <div className="flex justify-end"><div className="pixel-frame p-2.5 text-xs text-[var(--muted-foreground)]"><TypingIndicator label="El sospechoso está respondiendo" /></div></div>}
               <div ref={chatEndRef} />
             </div>
-            <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0">
+            <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-2 flex gap-2 shrink-0">
               {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-[8px] text-[var(--destructive)]">📎 {selectedEvidence.label}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
               <input ref={chatInputRef} value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta al sospechoso...` : "Pregunta al sospechoso..."} disabled={pending} />
               <button type="submit" disabled={pending || !chatDraft.trim()} className="pixel-btn text-xs px-4">{pending ? "..." : "ENVIAR"}</button>
