@@ -1150,7 +1150,7 @@ export default function Home() {
     setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
     // Reset ALL labels/state that could leak from a previous round.
     setError(""); setChatDraft(""); setDetectiveDraft("");
-    setSuspectResponding(false); setOtherTyping(false);
+    setSuspectResponding(false); setMainChatTyping(false); setDetectiveChatTyping(false);
     setDetectiveUnreadCount(0); setEvidencePopup(null);
     setFrozenRequiredVotes(1); setLobbyPlayers([]);
     // Re-add ourselves to lobbyPlayers so the count is correct.
