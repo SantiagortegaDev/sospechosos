@@ -968,7 +968,7 @@
 .pixel-chat-compact [class*="text-xs"] {
   font-size: 0.8rem;
 }
-.pixel-chat-compact .max-w-\\[80\\%\\] {
+.pixel-chat-compact .max-w-\[80\%\] {
   max-width: 75%;
 }
 
