@@ -1895,7 +1895,7 @@ export default function Home() {
               <div className="space-y-1.5 max-h-32 overflow-y-auto pixel-scroll">
                 {flaggedAnswers.map((m, i) => (
                   <div key={i} className="text-xs text-[var(--foreground)] italic leading-relaxed">
-                    "{m.text}"
+                    "{safeRender(m.text)}"
                   </div>
                 ))}
               </div>
@@ -1942,8 +1942,8 @@ export default function Home() {
                 <div className={cn("text-xl md:text-2xl font-bold tracking-widest", verdict.decision === "imprisoned" ? "text-[var(--destructive)]" : "text-[#4ec9b0]")} style={headFont}>{verdict.decision === "imprisoned" ? "ENCARCELADO" : "LIBRE"}</div>
                 <div className="text-xs text-[var(--muted-foreground)] mt-2 tracking-wider">{safeRender(currentCase?.suspect.name)} {verdict.decision === "imprisoned" ? "ha sido encontrado culpable" : "ha sido absuelto"}</div>
               </div>
-              <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--primary)] mb-2" style={headFont}>RAZONAMIENTO DE LA JUEZA</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{verdict.judgeReasoning}"</p></div>
-              <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--muted-foreground)] mb-2" style={headFont}>COMENTARIO</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{verdict.judgesComment}"</p></div>
+              <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--primary)] mb-2" style={headFont}>RAZONAMIENTO DE LA JUEZA</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(verdict.judgeReasoning)}"</p></div>
+              <div className="pixel-frame p-4 text-left"><div className="text-xs text-[var(--muted-foreground)] mb-2" style={headFont}>COMENTARIO</div><p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(verdict.judgesComment)}"</p></div>
               <button onClick={() => { setPhase("revelation"); generateRevelation(); }} className="pixel-btn py-3 px-8 mt-4" style={headFont}>VER LA VERDAD</button>
             </>
           ) : (
@@ -1993,9 +1993,9 @@ export default function Home() {
           </div>
 
           {ending && (<>
-            <div className={cn("text-lg md:text-xl font-bold tracking-widest", ending.isSpecial ? "text-[var(--primary)] pixel-text-glow" : "text-[var(--foreground)]")} style={headFont}>{ending.title}</div>
-            <p className="text-sm text-[var(--foreground)] leading-relaxed max-w-lg mx-auto">{ending.description}</p>
-            {ending.reference && <div className="text-[12px] text-[var(--muted-foreground)] italic">"{ending.reference}"</div>}
+            <div className={cn("text-lg md:text-xl font-bold tracking-widest", ending.isSpecial ? "text-[var(--primary)] pixel-text-glow" : "text-[var(--foreground)]")} style={headFont}>{safeRender(ending.title)}</div>
+            <p className="text-sm text-[var(--foreground)] leading-relaxed max-w-lg mx-auto">{safeRender(ending.description)}</p>
+            {ending.reference && <div className="text-[12px] text-[var(--muted-foreground)] italic">"{safeRender(ending.reference)}"</div>}
           </>)}
 
           <div className="border-t-2 border-[var(--border)]" />

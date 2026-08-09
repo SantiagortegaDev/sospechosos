@@ -7,6 +7,13 @@
 
 import { generateJudgeVerdict } from "./llm";
 
+/** Force any value to a plain string — LLMs sometimes return objects. */
+function forceStr(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "";
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+
 const JUDGE_SYSTEM_PROMPT = `Eres el JUEZ VALERIA CRUZ, una magistrada implacable con 30 años de experiencia. Has revisado TODA la evidencia de esta investigación.
 
 Tu Personalidad:
@@ -94,8 +101,8 @@ Devuelve tu veredicto como JSON.`;
         decision: parsed.decision === "freed" ? "freed" : "imprisoned",
         guiltyVotes: guiltyCount,
         innocentVotes: innocentCount,
-        judgeReasoning: parsed.judgeReasoning || "La corte ha tomado su decisión.",
-        judgesComment: parsed.judgesComment || "Justicia ha sido servida.",
+        judgeReasoning: forceStr(parsed.judgeReasoning) || "La corte ha tomado su decisión.",
+        judgesComment: forceStr(parsed.judgesComment) || "Justicia ha sido servida.",
       };
     }
 
