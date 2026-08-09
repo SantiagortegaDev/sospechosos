@@ -159,6 +159,10 @@ export default function Home() {
   const [username, setUsername] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [roundTime, setRoundTime] = useState<number>(5);
+  const [maxDetectives, setMaxDetectives] = useState<number>(2);
+  const [difficulty, setDifficulty] = useState<"facil" | "normal" | "dificil">("normal");
+  const [crimeTheme, setCrimeTheme] = useState<"random" | "fraude" | "robo" | "asesinato" | "sabotaje">("random");
+  const [aiVoice, setAiVoice] = useState<"on" | "off">("on");
   const [lobbyPlayers, setLobbyPlayers] = useState<
     Array<{ id: string; username: string; isHost: boolean }>
   >([]);
@@ -509,7 +513,7 @@ export default function Home() {
 
   /* ═══ HANDLERS ═══ */
 
-  const closeTutorial = () => { localStorage.setItem(TUTORIAL_KEY, "1"); setShowTutorial(false); };
+  const closeTutorial = () => { localStorage.setItem(TUTORIAL_KEY, "1"); setShowTutorial(false); SFX.soundClick(); };
 
   const handleCreateRoom = useCallback(async () => {
     if (!username.trim()) { setError("Ingresa un nombre de detective"); return; }
@@ -778,7 +782,7 @@ export default function Home() {
   ) : null;
 
   const BackBtn = ({ target, label = "◂ VOLVER" }: { target: GamePhase; label?: string }) => (
-    <button onClick={() => { setPhase(target); setError(""); }} className="pixel-btn-secondary w-full py-2 text-xs" style={bodyFont}>{label}</button>
+    <button onClick={() => { setPhase(target); setError(""); SFX.soundClick(); }} className="pixel-btn-secondary w-full py-2 text-xs" style={bodyFont}>{label}</button>
   );
 
   const PhaseIndicator = ({ current }: { current: GamePhase }) => {
@@ -840,7 +844,7 @@ export default function Home() {
           max={15}
           step={1}
           value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
+          onChange={(e) => { onChange(Number(e.target.value)); SFX.soundClick(); }}
           disabled={disabled}
           className="pixel-slider w-full"
           style={{ '--slider-fill': `${fillPercent}%` } as React.CSSProperties}
@@ -850,7 +854,7 @@ export default function Home() {
             <button
               key={m}
               type="button"
-              onClick={() => !disabled && onChange(m)}
+              onClick={() => { if (!disabled) { onChange(m); SFX.soundClick(); } }}
               disabled={disabled}
               className={cn(
                 "text-[9px] transition-all duration-150 cursor-pointer px-1",
@@ -865,6 +869,43 @@ export default function Home() {
       </div>
     );
   };
+
+  /* ─── Reusable option selector for create-screen settings ─── */
+  const OptionSelector = <T extends string | number>({
+    label,
+    value,
+    options,
+    onChange,
+    disabled,
+  }: {
+    label: string;
+    value: T;
+    options: Array<{ value: T; label: string; emoji?: string }>;
+    onChange: (v: T) => void;
+    disabled?: boolean;
+  }) => (
+    <div className="space-y-2">
+      <label className="text-xs text-[var(--foreground)] tracking-wider font-bold block">{label}</label>
+      <div className="grid grid-cols-2 gap-2">
+        {options.map((opt) => (
+          <button
+            key={String(opt.value)}
+            type="button"
+            onClick={() => { if (!disabled) { onChange(opt.value); SFX.soundClick(); } }}
+            disabled={disabled}
+            className={cn(
+              "pixel-frame p-2 text-center transition-all cursor-pointer",
+              value === opt.value && "pixel-frame-active",
+              disabled && "cursor-not-allowed opacity-40"
+            )}
+          >
+            {opt.emoji && <div className="text-sm mb-0.5">{opt.emoji}</div>}
+            <div className="text-[10px] tracking-wider text-[var(--foreground)]">{opt.label}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   /* ═══ RENDER: TUTORIAL ═══ */
   if (showTutorial) {
@@ -890,7 +931,7 @@ export default function Home() {
   if (phase === "welcome") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center cursor-pointer select-none relative"
-        onClick={() => { setWelcomeFlash(true); setTimeout(() => setPhase("create_or_join"), 600); }}>
+        onClick={() => { setWelcomeFlash(true); SFX.soundWhoosh(); setTimeout(() => setPhase("create_or_join"), 600); }}>
         {welcomeFlash && <div className="fixed inset-0 bg-white z-50 pointer-events-none pixel-screen-flash" />}
         <div className={cn("text-center space-y-8 relative z-10 transition-all duration-700", welcomeMounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6")}>
           <img src="/sospechosos-logo.png" alt="LOS SOSPECHOSOS" className="mx-auto w-full max-w-xl pixel-logo pixel-float" draggable={false} />
@@ -909,11 +950,11 @@ export default function Home() {
         <div className="pixel-frame max-w-lg w-full p-6 space-y-6 pixel-scale-in">
           <div className="pixel-header"><span>SALA DE INTERROGACIÓN</span></div>
           <div className="grid gap-4 pixel-stagger">
-            <button onClick={() => { setPhase("create"); setUsername(""); setError(""); }} className="pixel-frame pixel-frame-interactive p-4 text-left">
+            <button onClick={() => { setPhase("create"); setUsername(""); setError(""); SFX.soundClick(); }} className="pixel-frame pixel-frame-interactive p-4 text-left">
               <div className="text-[var(--primary)] font-bold tracking-widest text-sm" style={headFont}>CREAR SALA</div>
               <div className="text-[var(--muted-foreground)] text-xs mt-1" style={bodyFont}>Genera un código para que otro detective se una</div>
             </button>
-            <button onClick={() => { setPhase("join"); setUsername(""); setRoomCode(""); setError(""); }} className="pixel-frame pixel-frame-interactive p-4 text-left">
+            <button onClick={() => { setPhase("join"); setUsername(""); setRoomCode(""); setError(""); SFX.soundClick(); }} className="pixel-frame pixel-frame-interactive p-4 text-left">
               <div className="text-[var(--primary)] font-bold tracking-widest text-sm" style={headFont}>UNIRSE A SALA</div>
               <div className="text-[var(--muted-foreground)] text-xs mt-1" style={bodyFont}>Ingresa un código de sala existente</div>
             </button>
@@ -928,15 +969,63 @@ export default function Home() {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
         {AchievementOverlay}
-        <div className="pixel-frame max-w-md w-full p-6 space-y-5 pixel-scale-in" style={bodyFont}>
+        <div className="pixel-frame max-w-lg w-full p-6 space-y-5 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>CREAR SALA</span></div>
           {ErrorBanner}
+
           <div>
             <label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">TU NOMBRE DE DETECTIVE</label>
             <input value={username} onChange={(e) => setUsername(e.target.value)} maxLength={20} className="pixel-input w-full" placeholder="ej: Holmes" autoFocus />
           </div>
+
           <TimeSlider value={roundTime} onChange={setRoundTime} />
-          <button onClick={handleCreateRoom} disabled={loading || !username.trim()} className="pixel-btn w-full py-3" style={headFont}>{loading ? "CREANDO SALA..." : "CREAR SALA"}</button>
+
+          <OptionSelector
+            label="DETECTIVES MÁXIMOS"
+            value={maxDetectives}
+            onChange={setMaxDetectives}
+            options={[
+              { value: 2, label: "2 DETECTIVES", emoji: "👥" },
+              { value: 3, label: "3 DETECTIVES", emoji: "👨‍👩‍👦" },
+              { value: 4, label: "4 DETECTIVES", emoji: "👨‍👩‍👧‍👦" },
+            ]}
+          />
+
+          <OptionSelector
+            label="DIFICULTAD DEL CASO"
+            value={difficulty}
+            onChange={setDifficulty}
+            options={[
+              { value: "facil", label: "FÁCIL", emoji: "🟢" },
+              { value: "normal", label: "NORMAL", emoji: "🟡" },
+              { value: "dificil", label: "DIFÍCIL", emoji: "🔴" },
+            ]}
+          />
+
+          <OptionSelector
+            label="TEMA DEL CRIMEN"
+            value={crimeTheme}
+            onChange={setCrimeTheme}
+            options={[
+              { value: "random", label: "ALEATORIO", emoji: "🎲" },
+              { value: "fraude", label: "FRAUDE", emoji: "💰" },
+              { value: "robo", label: "ROBO", emoji: "🎭" },
+              { value: "asesinato", label: "ASESINATO", emoji: "🔪" },
+              { value: "sabotaje", label: "SABOTAJE", emoji: "💣" },
+            ]}
+          />
+
+          <OptionSelector
+            label="VOZ DEL SOSPECHOSO"
+            value={aiVoice}
+            onChange={setAiVoice}
+            options={[
+              { value: "on", label: "ACTIVADA", emoji: "🔊" },
+              { value: "off", label: "SILENCIADA", emoji: "🔇" },
+            ]}
+          />
+
+          <button onClick={() => { SFX.soundClick(); handleCreateRoom(); }} disabled={loading || !username.trim()} className="pixel-btn w-full py-3" style={headFont}>{loading ? "CREANDO SALA..." : "CREAR SALA"}</button>
           <BackBtn target="create_or_join" />
         </div>
       </main>
@@ -953,7 +1042,7 @@ export default function Home() {
           {ErrorBanner}
           <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">TU NOMBRE DE DETECTIVE</label><input value={username} onChange={(e) => setUsername(e.target.value)} maxLength={20} className="pixel-input w-full" placeholder="ej: Watson" /></div>
           <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">CÓDIGO DE SALA</label><input value={roomCode} onChange={(e) => setRoomCode(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""))} maxLength={8} className="pixel-input w-full uppercase tracking-widest" placeholder="abc123" autoFocus /></div>
-          <button onClick={handleJoinRoom} disabled={loading || !username.trim() || !roomCode.trim()} className="pixel-btn w-full py-3" style={headFont}>{loading ? "VERIFICANDO..." : "UNIRSE"}</button>
+          <button onClick={() => { SFX.soundClick(); handleJoinRoom(); }} disabled={loading || !username.trim() || !roomCode.trim()} className="pixel-btn w-full py-3" style={headFont}>{loading ? "VERIFICANDO..." : "UNIRSE"}</button>
           <BackBtn target="create_or_join" />
         </div>
       </main>
@@ -970,7 +1059,7 @@ export default function Home() {
           <div className="text-center text-xs text-[var(--foreground)] tracking-wider">CÓDIGO: <span className="text-[var(--primary)] text-sm">{roomCode.toUpperCase()}</span></div>
           {ErrorBanner}
           <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">TU NOMBRE DE DETECTIVE</label><input value={username} onChange={(e) => setUsername(e.target.value)} maxLength={20} className="pixel-input w-full" placeholder="ej: Watson" autoFocus /></div>
-          <button onClick={handleJoinByLink} disabled={loading || !username.trim()} className="pixel-btn w-full py-3" style={headFont}>{loading ? "UNIÉNDOSE..." : "ENTRAR A LA SALA"}</button>
+          <button onClick={() => { SFX.soundClick(); handleJoinByLink(); }} disabled={loading || !username.trim()} className="pixel-btn w-full py-3" style={headFont}>{loading ? "UNIÉNDOSE..." : "ENTRAR A LA SALA"}</button>
         </div>
       </main>
     );
@@ -986,7 +1075,7 @@ export default function Home() {
           <div className="text-center">
             <div className="text-xs text-[var(--foreground)] tracking-wider">CÓDIGO DE SALA</div>
             <div className="text-2xl font-bold tracking-[0.3em] text-[var(--primary)] mt-1" style={headFont}>{roomCode.toUpperCase()}</div>
-            <button onClick={copyInviteLink} className="text-xs text-[var(--muted-foreground)] hover:text-[var(--primary)] mt-2 transition-colors">📋 COPIAR LINK DE INVITACIÓN</button>
+            <button onClick={() => { SFX.soundClick(); copyInviteLink(); }} className="text-xs text-[var(--muted-foreground)] hover:text-[var(--primary)] mt-2 transition-colors">📋 COPIAR LINK DE INVITACIÓN</button>
           </div>
           <div>
             <div className="text-xs text-[var(--foreground)] tracking-wider mb-2">DETECTIVES EN SALA ({lobbyPlayers.length}/2)</div>
@@ -999,9 +1088,9 @@ export default function Home() {
             ))}
           </div>
           <TimeSlider value={roundTime} onChange={setRoundTime} disabled={!session?.isHost} />
-          {session?.isHost && <button onClick={handleStartGame} className="pixel-btn w-full py-3" style={headFont}>COMENZAR</button>}
+          {session?.isHost && <button onClick={() => { SFX.soundClick(); handleStartGame(); }} className="pixel-btn w-full py-3" style={headFont}>COMENZAR</button>}
           {!session?.isHost && <div className="text-center text-xs text-[var(--muted-foreground)] italic animate-pulse">Esperando al anfitrión para empezar...</div>}
-          <button onClick={leaveRoom} className="pixel-btn-danger w-full py-2 text-xs">SALIR DE LA SALA</button>
+          <button onClick={() => { SFX.soundError(); leaveRoom(); }} className="pixel-btn-danger w-full py-2 text-xs">SALIR DE LA SALA</button>
         </div>
       </main>
     );
@@ -1057,9 +1146,9 @@ export default function Home() {
             </div>
           )}
           {caseIntroStep >= totalSteps - 1 ? (
-            <button onClick={handleStartInterrogation} className="pixel-btn py-3 px-8 mt-4" style={headFont}>REVISAR EVIDENCIA ▶</button>
+            <button onClick={() => { SFX.soundClick(); handleStartInterrogation(); }} className="pixel-btn py-3 px-8 mt-4" style={headFont}>REVISAR EVIDENCIA ▶</button>
           ) : (
-            <button onClick={() => setCaseIntroStep((prev) => Math.min(prev + 1, totalSteps - 1))} className="pixel-btn-secondary py-2 px-6 mt-4" style={bodyFont}>CONTINUAR &gt;</button>
+            <button onClick={() => { SFX.soundClick(); setCaseIntroStep((prev) => Math.min(prev + 1, totalSteps - 1)); }} className="pixel-btn-secondary py-2 px-6 mt-4" style={bodyFont}>CONTINUAR &gt;</button>
           )}
         </div>
       </main>
@@ -1135,7 +1224,7 @@ export default function Home() {
         </div>
 
         <div className="p-3 border-t-2 border-[var(--border)] bg-[var(--card)]">
-          <button onClick={handleStartInterrogation} className="pixel-btn w-full py-3" style={headFont}>COMENZAR INTERROGATORIO ▶</button>
+          <button onClick={() => { SFX.soundWhoosh(); handleStartInterrogation(); }} className="pixel-btn w-full py-3" style={headFont}>COMENZAR INTERROGATORIO ▶</button>
         </div>
       </div>
     );
@@ -1251,7 +1340,7 @@ export default function Home() {
                 {evidenceItems.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">Sin evidencia</div> : (
                   <div className="space-y-2">
                     {evidenceItems.map((ev) => (
-                      <div key={ev.id} className={cn("pixel-frame p-2 transition-all cursor-pointer hover:translate-y-[-2px]", ev.isLocked && "opacity-40", selectedEvidence?.id === ev.id && "pixel-frame-active")} onClick={() => !ev.isLocked && setSelectedEvidence(ev === selectedEvidence ? null : ev)}>
+                      <div key={ev.id} className={cn("pixel-frame p-2 transition-all cursor-pointer hover:translate-y-[-2px]", ev.isLocked && "opacity-40", selectedEvidence?.id === ev.id && "pixel-frame-active")} onClick={() => { if (!ev.isLocked) { SFX.soundClick(); setSelectedEvidence(ev === selectedEvidence ? null : ev); } }}>
                         <div className="flex items-center gap-2">
                           <span className="text-sm">{ev.isRedHerring ? "🔴" : ev.isLocked ? "🔒" : "📄"}</span>
                           <span className="text-[10px] font-bold text-[var(--foreground)] tracking-wider">{ev.label}</span>
@@ -1277,7 +1366,7 @@ export default function Home() {
             )}
             {rightTab === "timeline" && (
               <div className="space-y-2">
-                <div className="flex items-center justify-between"><div className="text-xs text-[var(--primary)] font-bold">LÍNEA TEMPORAL</div><button onClick={addTimelineEntry} className="pixel-btn-secondary text-[8px] py-1 px-2">+ AGREGAR</button></div>
+                <div className="flex items-center justify-between"><div className="text-xs text-[var(--primary)] font-bold">LÍNEA TEMPORAL</div><button onClick={() => { SFX.soundClick(); addTimelineEntry(); }} className="pixel-btn-secondary text-[8px] py-1 px-2">+ AGREGAR</button></div>
                 {timelineEntries.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">Sin eventos</div> : (
                   <div className="space-y-2">{timelineEntries.map((entry) => (<div key={entry.id} className="pixel-frame p-2"><div className="text-[10px] text-[var(--primary)] font-bold tracking-wider">{entry.label}</div><div className="text-xs text-[var(--foreground)] mt-0.5">{entry.description}</div><div className="text-[8px] text-[var(--muted-foreground)] mt-1">— {entry.addedByName}</div></div>))}</div>
                 )}
@@ -1298,14 +1387,14 @@ export default function Home() {
                 <div className="text-xs text-[var(--primary)] font-bold mb-2">TÉCNICA DE INTERROGACIÓN</div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {TECHNIQUES.map((t) => (
-                    <button key={t.key} onClick={() => setTechnique(t.key)} className={cn("pixel-frame p-2 text-center transition-all cursor-pointer", technique === t.key && "pixel-frame-active")}>
+                    <button key={t.key} onClick={() => { SFX.soundClick(); setTechnique(t.key); }} className={cn("pixel-frame p-2 text-center transition-all cursor-pointer", technique === t.key && "pixel-frame-active")}>
                       <div className="text-sm">{t.emoji}</div>
                       <div className="text-[8px] text-[var(--foreground)] tracking-wider">{t.label}</div>
                     </button>
                   ))}
                 </div>
                 <div className="text-xs text-[var(--primary)] font-bold mb-2">PREGUNTAS RÁPIDAS</div>
-                {QUICK_QUESTIONS.map((q) => (<button key={q.label} onClick={() => insertQuickQuestion(q.text)} className="pixel-frame w-full p-2 text-left hover:bg-[var(--primary)]/10 transition-all cursor-pointer"><div className="text-[9px] text-[var(--primary)] tracking-wider font-bold">{q.label.toUpperCase()}</div><div className="text-xs text-[var(--foreground)] mt-0.5">"{q.text}"</div></button>))}
+                {QUICK_QUESTIONS.map((q) => (<button key={q.label} onClick={() => { SFX.soundClick(); insertQuickQuestion(q.text); }} className="pixel-frame w-full p-2 text-left hover:bg-[var(--primary)]/10 transition-all cursor-pointer"><div className="text-[9px] text-[var(--primary)] tracking-wider font-bold">{q.label.toUpperCase()}</div><div className="text-xs text-[var(--foreground)] mt-0.5">"{q.text}"</div></button>))}
               </div>
             )}
           </div>
@@ -1332,7 +1421,7 @@ export default function Home() {
             >
               {muted ? "🔇" : "🔊"}
             </button>
-            <button onClick={enterDeliberation} className="pixel-btn-secondary text-[8px] py-1 px-2">DELIBERAR</button>
+            <button onClick={() => { SFX.soundClick(); enterDeliberation(); }} className="pixel-btn-secondary text-[8px] py-1 px-2">DELIBERAR</button>
           </div>
         </header>
 
@@ -1433,7 +1522,7 @@ export default function Home() {
               <div ref={chatEndRef} />
             </div>
             <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0">
-              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-[8px] text-[var(--destructive)]">📎 {selectedEvidence.label}</span><button type="button" onClick={() => setSelectedEvidence(null)} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
+              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-[8px] text-[var(--destructive)]">📎 {selectedEvidence.label}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
               <input ref={chatInputRef} value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta al sospechoso...` : "Pregunta al sospechoso..."} disabled={pending} />
               <button type="submit" disabled={pending || !chatDraft.trim()} className="pixel-btn text-xs px-4">{pending ? "..." : "ENVIAR"}</button>
             </form>
@@ -1492,7 +1581,7 @@ export default function Home() {
               <div><div className="text-xs text-[var(--foreground)] tracking-wider">EVIDENCIA</div><div className="text-lg font-bold text-[var(--primary)]">{evidenceItems.filter(e => !e.isLocked).length}/{evidenceItems.length}</div></div>
               <div className="border-t border-[var(--border)] pt-2"><div className="text-xs text-[var(--foreground)] mb-1">SOSPECHOSO</div><div className="text-xs text-[var(--foreground)]">{currentCase?.suspect.avatar} {currentCase?.suspect.name} — {currentCase?.suspect.role}</div></div>
             </div>
-            {(timeOk || delibTimeRemaining <= 0) && <button onClick={skipToVote} className="pixel-btn w-full py-3 mt-auto" style={headFont}>VOTAR AHORA ▶</button>}
+            {(timeOk || delibTimeRemaining <= 0) && <button onClick={() => { SFX.soundClick(); skipToVote(); }} className="pixel-btn w-full py-3 mt-auto" style={headFont}>VOTAR AHORA ▶</button>}
           </aside>
           <section className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto pixel-scroll p-4 space-y-3">
@@ -1502,7 +1591,7 @@ export default function Home() {
             </div>
             <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0"><input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." /><button type="submit" className="pixel-btn text-xs px-4">ENVIAR</button></form>
             <div className="md:hidden p-3 border-t-2 border-[var(--border)] bg-[var(--card)]">
-              {(timeOk || delibTimeRemaining <= 0) ? <button onClick={skipToVote} className="pixel-btn w-full py-3" style={headFont}>VOTAR AHORA ▶</button> : <div className="text-center text-xs text-[var(--muted-foreground)] italic">Espera 30 segundos... ({formatTime(30 - (DELIBERATION_SECONDS - delibTimeRemaining))})</div>}
+              {(timeOk || delibTimeRemaining <= 0) ? <button onClick={() => { SFX.soundClick(); skipToVote(); }} className="pixel-btn w-full py-3" style={headFont}>VOTAR AHORA ▶</button> : <div className="text-center text-xs text-[var(--muted-foreground)] italic">Espera 30 segundos... ({formatTime(30 - (DELIBERATION_SECONDS - delibTimeRemaining))})</div>}
             </div>
           </section>
         </div>
@@ -1533,11 +1622,11 @@ export default function Home() {
           ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setVoteChoice("guilty")} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "guilty" ? "border-[var(--destructive)] bg-[var(--destructive)]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[var(--destructive)]")}> <div className="text-2xl">⚖️</div><div className="text-sm font-bold tracking-widest mt-2 text-[var(--destructive)]" style={headFont}>CULPABLE</div><div className="text-[9px] text-[var(--muted-foreground)] mt-1">Va a prisión</div></button>
-                <button onClick={() => setVoteChoice("innocent")} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "innocent" ? "border-[#4ec9b0] bg-[#4ec9b0]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[#4ec9b0]")}><div className="text-2xl">🕊️</div><div className="text-sm font-bold tracking-widest mt-2 text-[#4ec9b0]" style={headFont}>INOCENTE</div><div className="text-[9px] text-[var(--muted-foreground)] mt-1">Queda libre</div></button>
+                <button onClick={() => { SFX.soundClick(); setVoteChoice("guilty"); }} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "guilty" ? "border-[var(--destructive)] bg-[var(--destructive)]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[var(--destructive)]")}> <div className="text-2xl">⚖️</div><div className="text-sm font-bold tracking-widest mt-2 text-[var(--destructive)]" style={headFont}>CULPABLE</div><div className="text-[9px] text-[var(--muted-foreground)] mt-1">Va a prisión</div></button>
+                <button onClick={() => { SFX.soundClick(); setVoteChoice("innocent"); }} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "innocent" ? "border-[#4ec9b0] bg-[#4ec9b0]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[#4ec9b0]")}><div className="text-2xl">🕊️</div><div className="text-sm font-bold tracking-widest mt-2 text-[#4ec9b0]" style={headFont}>INOCENTE</div><div className="text-[9px] text-[var(--muted-foreground)] mt-1">Queda libre</div></button>
               </div>
               <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">RAZÓN DE TU VOTO</label><textarea value={voteReason} onChange={(e) => setVoteReason(e.target.value)} className="pixel-input w-full min-h-[80px] resize-none text-xs" placeholder="¿Por qué?" /></div>
-              <button onClick={handleSubmitVote} disabled={!voteChoice} className={cn("w-full py-3 text-xs tracking-widest font-bold cursor-pointer", voteChoice ? (voteChoice === "guilty" ? "pixel-btn-danger" : "pixel-btn") : "pixel-btn-secondary opacity-30")} style={headFont}>REGISTRAR VOTO</button>
+              <button onClick={() => { SFX.soundVerdict(); handleSubmitVote(); }} disabled={!voteChoice} className={cn("w-full py-3 text-xs tracking-widest font-bold cursor-pointer", voteChoice ? (voteChoice === "guilty" ? "pixel-btn-danger" : "pixel-btn") : "pixel-btn-secondary opacity-30")} style={headFont}>REGISTRAR VOTO</button>
             </div>
           )}
         </div>
@@ -1646,7 +1735,7 @@ export default function Home() {
             </div>
           </div>
 
-          <button onClick={playAgain} className="pixel-btn py-3 px-8" style={headFont}>JUGAR DE NUEVO</button>
+          <button onClick={() => { SFX.soundClick(); playAgain(); }} className="pixel-btn py-3 px-8" style={headFont}>JUGAR DE NUEVO</button>
         </div>
       </main>
     );
