@@ -284,13 +284,15 @@ export default function Home() {
     timerEndsAt: number | null;
   }>({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
 
-  /* Detective typing indicator (chat privado) + suspect responding indicator. */
-  const [otherTyping, setOtherTyping] = useState(false);
+  /* Typing indicators — split so main-chat and detective-chat are independent. */
+  const [mainChatTyping, setMainChatTyping] = useState(false);
+  const [detectiveChatTyping, setDetectiveChatTyping] = useState(false);
   const [suspectResponding, setSuspectResponding] = useState(false);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /* Separate ref for throttling our OWN typing broadcasts (sender side).
-   * typingTimeoutRef above is used by the receiver to reset otherTyping. */
-  const typingBroadcastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mainChatTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detectiveChatTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* Separate refs for throttling our OWN typing broadcasts (sender side). */
+  const mainChatBroadcastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detectiveChatBroadcastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [detectiveUnreadCount, setDetectiveUnreadCount] = useState(0);
 
   /* Evidence */
@@ -463,11 +465,18 @@ export default function Home() {
         if (type === "question.edit") {
           setTurnState((prev) => ({ ...prev, proposedText: payload.text as string }));
         }
-        // Detectives typing indicator — show "respondiendo..." to the other.
+        // Detectives typing indicator — route to the correct chat based on source.
         if (type === "detective.typing") {
-          setOtherTyping(true);
-          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-          typingTimeoutRef.current = setTimeout(() => setOtherTyping(false), 3000);
+          const source = (payload.source as string) || "main";
+          if (source === "detective") {
+            setDetectiveChatTyping(true);
+            if (detectiveChatTypingTimeoutRef.current) clearTimeout(detectiveChatTypingTimeoutRef.current);
+            detectiveChatTypingTimeoutRef.current = setTimeout(() => setDetectiveChatTyping(false), 3000);
+          } else {
+            setMainChatTyping(true);
+            if (mainChatTypingTimeoutRef.current) clearTimeout(mainChatTypingTimeoutRef.current);
+            mainChatTypingTimeoutRef.current = setTimeout(() => setMainChatTyping(false), 3000);
+          }
         }
         // Suspect responding indicator — broadcast to both detectives.
         if (type === "suspect.responding") {
@@ -588,6 +597,10 @@ export default function Home() {
               if (typeof t === "number" && t > 0) setTimeRemaining(t);
               if (typeof tt === "number" && tt > 0) setTotalTime(tt);
             }
+            // Non-host: show loading state while waiting for revelation data.
+            if (newPhase === "revelation" && !session?.isHost) {
+              setRevelationLoading(true);
+            }
           }
         }
 
@@ -635,6 +648,15 @@ export default function Home() {
                 if (e) setEnding(e);
               }
             }
+          }
+        }
+        // Revelation data broadcast — host sends structured revelation to
+        // the guest so they can render it without generatedCaseRaw.
+        if (type === "game.revelation") {
+          const rev = payload.revelation;
+          if (rev) {
+            setRevelation(rev);
+            setRevelationLoading(false);
           }
         }
       } catch { /* ignore */ }
@@ -1499,9 +1521,10 @@ export default function Home() {
       // Do NOT re-call /api/generate-case — the in-memory cache may be lost
       // on serverless cold starts, and temperature=0.9 means we'd get a
       // completely different case.
+      let revData: typeof revelation | null = null;
       if (generatedCaseRaw) {
         const s = generatedCaseRaw.suspect;
-        setRevelation({
+        revData = {
           suspectName: safeRender(s.name),
           culpability: s.culpability,
           truth: safeRender(s.truth),
@@ -1517,18 +1540,31 @@ export default function Home() {
             time: safeRender(t.time),
             event: safeRender(t.event),
           })),
-        });
+        };
+        setRevelation(revData);
       } else {
         // Fallback for hardcoded cases that have no generatedCaseRaw.
         const s = currentCase.suspect;
-        setRevelation({
+        revData = {
           suspectName: safeRender(s.name),
           culpability: s.isGuilty ? "guilty" : "innocent",
           truth: currentCase.briefing ? safeRender(currentCase.briefing) : "La verdad no pudo ser recuperada.",
           evidence: [],
           timeline: [],
-        });
+        };
+        setRevelation(revData);
       }
+      // Broadcast revelation data to the guest so they can render it
+      // without needing generatedCaseRaw (which they don't have).
+      try {
+        if (revData) {
+          const broadcastRevelation = (attempt: number) => {
+            try { sendGame({ type: "game.revelation", content: { type: "game.revelation", revelation: revData } }); } catch { /* ignore */ }
+            if (attempt < 3) setTimeout(() => broadcastRevelation(attempt + 1), 500 * (attempt + 1));
+          };
+          broadcastRevelation(0);
+        }
+      } catch { /* ignore */ }
     } catch {
       setRevelation({
         suspectName: safeRender(currentCase.suspect.name),
@@ -1985,7 +2021,6 @@ export default function Home() {
         {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-md w-full p-8 space-y-6 text-center pixel-scale-in">
           <div className="pixel-header"><span>ESPERANDO AL ANFITRIÓN</span></div>
-          <div className="text-4xl animate-pulse">🕵️</div>
           <div className="space-y-2">
             <div className="text-sm text-[var(--primary)] tracking-widest animate-pulse" style={headFont}>GENERANDO CASO...</div>
             <div className="text-xs text-[var(--muted-foreground)] leading-relaxed">
@@ -2195,7 +2230,7 @@ export default function Home() {
     const rightTabsContent = (() => {
       const tabList = [
         { key: "evidencia" as const, label: `EVIDENCIA (${unlockedCount}/${totalEvCount})` },
-        { key: "detectives" as const, label: detectiveUnreadCount > 0 && rightTab !== "detectives" ? `DETECTIVES (${detectiveUnreadCount})` : "DETECTIVES", showTyping: otherTyping && rightTab !== "detectives" },
+        { key: "detectives" as const, label: detectiveUnreadCount > 0 && rightTab !== "detectives" ? `DETECTIVES (${detectiveUnreadCount})` : "DETECTIVES", showTyping: detectiveChatTyping && rightTab !== "detectives" },
         { key: "herramientas" as const, label: "HERRAMIENTAS" },
       ] as const;
       return (
@@ -2292,7 +2327,7 @@ export default function Home() {
               <div className="flex flex-col" style={{ height: "calc(100vh - 220px)", minHeight: "260px" }}>
                 <div className="text-xs text-[var(--primary)] font-bold mb-2 flex items-center gap-2">
                   <span>CHAT PRIVADO — DETECTIVES</span>
-                  {otherTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-1"><TypingIndicator /> escribiendo...</span>}
+                  {detectiveChatTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-1"><TypingIndicator /> escribiendo...</span>}
                 </div>
                 <div className="flex-1 pixel-scroll-hide overflow-y-auto space-y-2 mb-2 border border-[var(--border)] p-2 min-h-[120px]">
                   {detectiveMessages.map((dm, i) => (
@@ -2301,7 +2336,7 @@ export default function Home() {
                       <span className="text-[var(--foreground)]">{safeRender(dm.text)}</span>
                     </div>
                   ))}
-                  {otherTyping && (
+                  {detectiveChatTyping && (
                     <div className="text-left">
                       <div className="inline-block pixel-frame p-2 text-xs text-[var(--muted-foreground)]"><TypingIndicator /></div>
                     </div>
@@ -2315,9 +2350,9 @@ export default function Home() {
                       setDetectiveDraft(e.target.value);
                       // Broadcast typing indicator (throttled by 1.5s).
                       try {
-                        if (!typingBroadcastRef.current) {
-                          sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId } });
-                          typingBroadcastRef.current = setTimeout(() => { typingBroadcastRef.current = null; }, 1500);
+                        if (!detectiveChatBroadcastRef.current) {
+                          sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId, source: "detective" } });
+                          detectiveChatBroadcastRef.current = setTimeout(() => { detectiveChatBroadcastRef.current = null; }, 1500);
                         }
                       } catch { /* ignore */ }
                     }}
@@ -2557,7 +2592,7 @@ export default function Home() {
               </div>
             )}
             {/* Typing indicator — shows when the other detective is writing a question */}
-            {isMultiplayer && otherTyping && turnState.status !== "reviewing" && (
+            {isMultiplayer && mainChatTyping && turnState.status !== "reviewing" && (
               <div className="px-3 py-1 border-t border-[var(--border)] bg-[var(--card)] text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-2 shrink-0">
                 <TypingIndicator />
                 <span>El otro detective está escribiendo...</span>
@@ -2570,9 +2605,9 @@ export default function Home() {
                 // Broadcast typing indicator to the other detective (throttled).
                 if (isMultiplayer) {
                   try {
-                    if (!typingBroadcastRef.current) {
-                      sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId } });
-                      typingBroadcastRef.current = setTimeout(() => { typingBroadcastRef.current = null; }, 1500);
+                    if (!mainChatBroadcastRef.current) {
+                      sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId, source: "main" } });
+                      mainChatBroadcastRef.current = setTimeout(() => { mainChatBroadcastRef.current = null; }, 1500);
                     }
                   } catch { /* ignore */ }
                 }
@@ -2700,7 +2735,7 @@ export default function Home() {
             <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--card)]">
               <div className="text-xs text-[var(--primary)] font-bold tracking-wider flex items-center gap-2">
                 <span>CHAT PRIVADO — DETECTIVES</span>
-                {otherTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-1"><TypingIndicator /> escribiendo...</span>}
+                {detectiveChatTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-1"><TypingIndicator /> escribiendo...</span>}
               </div>
               <div className="text-[10px] text-[var(--muted-foreground)] italic">Discutan sus conclusiones antes de votar</div>
             </div>
@@ -2712,7 +2747,7 @@ export default function Home() {
                   <div className={cn("pixel-frame p-2.5 text-xs text-[var(--foreground)] max-w-[80%]", dm.detectiveId === playerId && "pixel-frame-active")}>{safeRender(dm.text)}</div>
                 </div>
               ))}
-              {otherTyping && (
+              {detectiveChatTyping && (
                 <div className="flex items-start">
                   <div className="pixel-frame p-2.5 text-xs text-[var(--muted-foreground)]">
                     <TypingIndicator />
@@ -2721,15 +2756,22 @@ export default function Home() {
               )}
               <div ref={chatEndRef} />
             </div>
+            {/* Typing indicator bar above input */}
+            {detectiveChatTyping && (
+              <div className="px-3 py-1 border-t border-[var(--border)] bg-[var(--card)] text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-2 shrink-0">
+                <TypingIndicator />
+                <span>El otro detective está escribiendo...</span>
+              </div>
+            )}
             <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0 items-stretch">
               <input
                 value={detectiveDraft}
                 onChange={(e) => {
                   setDetectiveDraft(e.target.value);
                   try {
-                    if (!typingBroadcastRef.current) {
-                      sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId } });
-                      typingBroadcastRef.current = setTimeout(() => { typingBroadcastRef.current = null; }, 1500);
+                    if (!detectiveChatBroadcastRef.current) {
+                      sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId, source: "detective" } });
+                      detectiveChatBroadcastRef.current = setTimeout(() => { detectiveChatBroadcastRef.current = null; }, 1500);
                     }
                   } catch { /* ignore */ }
                 }}
