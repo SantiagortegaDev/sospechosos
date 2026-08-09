@@ -146,7 +146,7 @@ export async function POST(req: Request) {
       {
         error: "rate_limited",
         detail:
-          "Límite de tokens de Groq alcanzado (100k/día en tier gratuito). Espera ~20 minutos o usa una seed ya generada. Mientras tanto, el sospechoso guarda silencio.",
+          "Límite de Gemini alcanzado. Espera unos minutos o usa una seed ya generada. Mientras tanto, el sospechoso guarda silencio.",
       },
       { status: 429 }
     );

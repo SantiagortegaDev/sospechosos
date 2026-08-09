@@ -35,6 +35,7 @@ export interface GameMessage {
   senderName: string;
   text: string;
   timestamp: number;
+  flagged?: boolean;
 }
 
 /* ─── Detectives private channel ─── */

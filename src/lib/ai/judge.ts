@@ -2,9 +2,10 @@
  * AI Judge — only activates at the END of the game.
  * Evaluates the collective detective decision (vote results) and decides:
  * - If the suspect goes FREE or is IMPRISONED
+ * Uses Gemini via Google AI Studio.
  */
 
-import { getClient } from "./llm";
+import { generateJudgeVerdict } from "./llm";
 
 const JUDGE_SYSTEM_PROMPT = `Eres el JUEZ VALERIA CRUZ, una magistrada implacable con 30 años de experiencia. Has revisado TODA la evidencia de esta investigación.
 
@@ -47,7 +48,6 @@ export async function evaluateVote(
   judgeReasoning: string;
   judgesComment: string;
 }> {
-  // Use the provided override (from generated cases) or fall back to false
   const suspectName = suspectNameOverride || "Desconocido";
   const actualGuilty = suspectIsGuiltyOverride ?? false;
 
@@ -55,14 +55,9 @@ export async function evaluateVote(
   const innocentCount = votes.filter(v => v.vote === "innocent").length;
   const majorityGuilty = guiltyCount > innocentCount;
 
-  // The majority voted guilty = they want to imprison
-  // The majority voted innocent = they want to free
-  // But was their decision correct?
   const majorityCorrect =
     (majorityGuilty && actualGuilty) || (!majorityGuilty && !actualGuilty);
 
-  // Decision: imprison if majority voted guilty AND suspect IS actually guilty
-  // OR if majority voted innocent but suspect IS guilty (detectives let criminal go)
   const decision: "freed" | "imprisoned" = majorityGuilty ? "imprisoned" : "freed";
 
   const voteSummary = votes.map(v =>
@@ -89,18 +84,7 @@ Recuerda: La REALIDAD del caso es que ${suspectName} ${actualGuilty ? "ES culpab
 Devuelve tu veredicto como JSON.`;
 
   try {
-    const groq = getClient();
-    const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: JUDGE_SYSTEM_PROMPT },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 400,
-    });
-
-    const raw = (completion.choices?.[0]?.message?.content ?? "").trim();
+    const raw = await generateJudgeVerdict(JUDGE_SYSTEM_PROMPT, prompt);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);

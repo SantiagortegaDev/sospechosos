@@ -332,8 +332,37 @@ export default function Home() {
         }
 
         if (type === "game.start") {
-          const caseData = payload.case as CaseInfo;
-          if (caseData) setCurrentCase(caseData);
+          // Host sends only the seed — non-host must fetch the case from API.
+          // This avoids sending RegExp objects through the Portal SDK which
+          // caused React #310 (InterpretGeneratorResume crash).
+          const seed = payload.seed as string | undefined;
+          if (seed && !currentCase) {
+            // Non-host: fetch the generated case using the seed
+            const loadCase = async () => {
+              try {
+                const res = await fetch("/api/generate-case", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ seed }),
+                });
+                if (!res.ok) { console.error("[game.start] Failed to fetch case for seed:", seed); return; }
+                const generated = await res.json() as GeneratedCase;
+                rememberGender(generated.seed, generated.suspect?.gender ?? "man");
+                setGeneratedCaseRaw(generated);
+                const caseInfo = adaptGeneratedCase(generated);
+                setCurrentCase(caseInfo);
+                if (caseInfo.evidence && caseInfo.evidence.length > 0) {
+                  setEvidenceItems(caseInfo.evidence.map(e => ({ ...e, isLocked: !!e.unlockTopic })));
+                }
+                setPhase("case_intro");
+                setCaseIntroStep(0);
+                SFX.soundCaseReady();
+              } catch (err) {
+                console.error("[game.start] Failed to load case:", err);
+              }
+            };
+            loadCase();
+          }
         }
 
         if (type === "game.phase") {
@@ -641,7 +670,12 @@ export default function Home() {
     if (caseInfo.evidence && caseInfo.evidence.length > 0) {
       setEvidenceItems(caseInfo.evidence.map(e => ({ ...e, isLocked: !!e.unlockTopic })));
     }
-    try { await sendGame({ type: "game.start", content: { type: "game.start", case: caseInfo } }); } catch { /* ok */ }
+    // Only send the seed via Portal SDK — NOT the full CaseInfo.
+    // CaseInfo contains RegExp objects in stressRules[].match which are
+    // non-serializable and cause React #310 inside the Portal SDK's
+    // async generator internals (InterpretGeneratorResume).
+    // The non-host will fetch the case from /api/generate-case using the seed.
+    try { await sendGame({ type: "game.start", content: { type: "game.start", seed: generated.seed } }); } catch { /* ok */ }
     setPhase("case_intro"); setCaseIntroStep(0);
     SFX.soundCaseReady();
   }, [sendGame]);
@@ -745,11 +779,11 @@ export default function Home() {
             senderType: "suspect",
             senderId: "system",
             senderName: "SISTEMA",
-            text: "[Límite de tokens de Groq alcanzado. El sospechoso guarda silencio. Espera ~20 min o usa una seed ya generada.]",
+            text: "[Límite de Gemini alcanzado. El sospechoso guarda silencio. Espera unos minutos o usa una seed ya generada.]",
             timestamp: Date.now(),
           };
           setChatMessages((prev) => [...prev.slice(-80), rateLimitMsg]);
-          setError("Límite de Groq alcanzado — espera unos minutos o usa una seed ya generada.");
+          setError("Límite de Gemini alcanzado — espera unos minutos o usa una seed ya generada.");
           SFX.soundError();
           return;
         }
@@ -758,7 +792,7 @@ export default function Home() {
       const data = await res.json();
 
       const answerText = data.answer?.text || "No tengo nada que decir.";
-      const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: answerText, timestamp: Date.now() };
+      const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: answerText, timestamp: Date.now(), flagged: data.answer?.flagged };
       setChatMessages((prev) => [...prev.slice(-80), aMsg]);
       try { await sendGame({ type: "suspect.answer", content: aMsg }); } catch { /* ok */ }
 
@@ -1792,7 +1826,7 @@ export default function Home() {
           <section className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2">
               {detectiveMessages.length === 0 && <div className="text-center text-xs text-[var(--muted-foreground)] italic py-8">Discute tus conclusiones...</div>}
-              {detectiveMessages.map((dm, i) => (<div key={i} className="flex flex-col items-start"><div className="text-[12px] text-[var(--primary)] tracking-wider">[{dm.detectiveName}]</div><div className="pixel-frame p-2.5 text-xs text-[var(--foreground)] max-w-[80%]">{dm.text}</div></div>))}
+              {detectiveMessages.map((dm, i) => (<div key={i} className="flex flex-col items-start"><div className="text-[12px] text-[var(--primary)] tracking-wider">[{safeRender(dm.detectiveName)}]</div><div className="pixel-frame p-2.5 text-xs text-[var(--foreground)] max-w-[80%]">{safeRender(dm.text)}</div></div>))}
               <div ref={chatEndRef} />
             </div>
             <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0"><input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." /><button type="submit" className="pixel-btn text-xs px-4">ENVIAR</button></form>

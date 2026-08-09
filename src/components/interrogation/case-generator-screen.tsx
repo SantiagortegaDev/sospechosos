@@ -107,7 +107,7 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack: _onBack 
           const errBody = await res.json().catch(() => ({}));
           if (res.status === 429 || errBody.error === "rate_limited") {
             throw new Error(
-              "Límite de tokens de Groq alcanzado (100k/día en tier gratuito). Espera ~20 minutos o usa una seed ya generada."
+              "Límite de Gemini alcanzado. Espera unos minutos o usa una seed ya generada."
             );
           }
           throw new Error(errBody.error || errBody.detail || `HTTP ${res.status}`);

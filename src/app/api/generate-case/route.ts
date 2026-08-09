@@ -4,14 +4,13 @@
  * Body: { seed: string }
  *
  * Returns: GeneratedCase (see src/lib/ai/generated-case.ts).
+ * Uses Gemini via Google AI Studio.
  */
 
 import { NextResponse } from "next/server";
-import { getClient } from "@/lib/ai/llm";
+import { generateCaseFromSeed } from "@/lib/ai/llm";
 import type { GeneratedCase } from "@/lib/ai/generated-case";
 import { deepSanitize } from "@/lib/ai/deep-sanitize";
-
-const MODEL = "llama-3.1-8b-instant";
 
 const cache = new Map<string, GeneratedCase>();
 
@@ -90,22 +89,10 @@ export async function POST(req: Request) {
     return NextResponse.json(cached);
   }
 
-  const groq = getClient();
   const systemPrompt = SYSTEM_PROMPT.replace("%SEED%", seed);
 
   try {
-    const completion = await groq.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: `Genera el caso para la semilla: ${seed}` },
-      ],
-      temperature: 0.9,
-      max_tokens: 1800,
-      response_format: { type: "json_object" },
-    });
-
-    const raw = completion.choices?.[0]?.message?.content ?? "";
+    const raw = await generateCaseFromSeed(systemPrompt, seed);
     let parsed: GeneratedCase;
     try {
       parsed = JSON.parse(raw) as GeneratedCase;
@@ -168,11 +155,11 @@ export async function POST(req: Request) {
   } catch (err) {
     const msg = (err as Error).message;
     console.error("[generate-case] failed:", msg);
-    if (msg.includes("429") || msg.includes("rate_limit")) {
+    if (msg === "RATE_LIMITED") {
       return NextResponse.json(
         {
           error: "rate_limited",
-          detail: "Límite de tokens de Groq alcanzado. Espera unos minutos o usa otra seed ya generada.",
+          detail: "Límite de Gemini alcanzado. Espera unos minutos o usa otra seed ya generada.",
         },
         { status: 429 }
       );

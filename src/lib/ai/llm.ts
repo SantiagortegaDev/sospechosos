@@ -1,22 +1,23 @@
 /**
- * LLM wrapper — Groq (Llama 3.3 70B).
- * Now includes conversation history for memory.
+ * LLM wrapper — Google Gemini (via Google AI Studio).
+ * Uses @google/generative-ai SDK.
+ * Includes conversation history for memory.
  */
 
 import "server-only";
-import Groq from "groq-sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-let _groq: Groq | null = null;
+let _genAI: GoogleGenerativeAI | null = null;
 
-export function getClient(): Groq {
-  if (_groq) return _groq;
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("GROQ_API_KEY is not set.");
-  _groq = new Groq({ apiKey });
-  return _groq;
+export function getClient(): GoogleGenerativeAI {
+  if (_genAI) return _genAI;
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) throw new Error("GOOGLE_AI_API_KEY is not set.");
+  _genAI = new GoogleGenerativeAI(apiKey);
+  return _genAI;
 }
 
-const MODEL = "llama-3.3-70b-versatile";
+const MODEL = "gemini-2.0-flash";
 
 const SPANISH_INSTRUCTION = `\n\nIDIOMA: Debes responder SIEMPRE en español. Toda tu salida debe estar en español natural. No mezcles inglés. Tu personaje habla español como lengua materna.
 
@@ -36,7 +37,7 @@ export interface GenerateReplyOutput {
   text: string;
   stressLevel?: number;
   ms: number;
-  /** True if the call failed due to Groq rate limit (429). */
+  /** True if the call failed due to rate limit (429). */
   rateLimited?: boolean;
 }
 
@@ -44,7 +45,7 @@ export async function generateSuspectReply(
   input: GenerateReplyInput
 ): Promise<GenerateReplyOutput> {
   const t0 = Date.now();
-  const groq = getClient();
+  const genAI = getClient();
 
   // Build stress modifier for system prompt
   let stressModifier = "";
@@ -61,55 +62,68 @@ export async function generateSuspectReply(
     }
   }
 
-  const messages: Array<
-    | { role: "system"; content: string }
-    | { role: "user"; content: string }
-    | { role: "assistant"; content: string }
-  > = [
-    { role: "system", content: input.systemPrompt + stressModifier + SPANISH_INSTRUCTION },
-    // Include last 10 turns of conversation for memory
-    ...input.history.slice(-20),
-    { role: "user", content: input.question },
-  ];
+  const systemInstruction = input.systemPrompt + stressModifier + SPANISH_INSTRUCTION;
 
-  // Retry logic: transient network errors are common with Groq free tier.
-  // One retry with a short delay before falling back.
+  // Build conversation history for Gemini format
+  // Gemini uses "user" and "model" roles (not "assistant")
+  const historyContents = input.history.slice(-20).map((turn) => ({
+    role: turn.role === "user" ? "user" as const : "model" as const,
+    parts: [{ text: turn.content }],
+  }));
+
   const MAX_RETRIES = 1;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const completion = await groq.chat.completions.create({
+      const model = genAI.getGenerativeModel({
         model: MODEL,
-        messages,
-        temperature: 0.7,
-        max_tokens: 250,
+        systemInstruction,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 250,
+        },
       });
 
+      const chat = model.startChat({ history: historyContents });
+      const result = await chat.sendMessage(input.question);
+
       const text =
-        completion.choices?.[0]?.message?.content?.trim() ??
-        "No tengo nada más que decir.";
+        result.response.text()?.trim() ?? "No tengo nada más que decir.";
 
       return { text, ms: Date.now() - t0 };
     } catch (err) {
       const errMsg = (err as Error).message ?? "";
       console.error(`[llm] generateSuspectReply failed (attempt ${attempt + 1}):`, errMsg);
 
-      // Detect rate limit (429) — no point retrying, bail immediately.
-      if (errMsg.includes("429") || errMsg.includes("rate_limit")) {
+      // Detect rate limit (429) — bail immediately.
+      if (errMsg.includes("429") || errMsg.includes("rate_limit") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("QUOTA")) {
         return {
-          text: "[Límite de Groq alcanzado — espera unos minutos o usa una seed ya generada. El sospechoso permanece en silencio.]",
+          text: "[Límite de Gemini alcanzado — espera unos minutos. El sospechoso permanece en silencio.]",
           ms: Date.now() - t0,
           rateLimited: true,
         };
       }
 
-      // If we have retries left, wait 1s and try again.
+      // Safety filter triggered — return in-character evasion
+      if (errMsg.includes("SAFETY") || errMsg.includes("blocked")) {
+        // Gemini safety filters sometimes trigger on interrogation content
+        // Return a neutral in-character response
+        const safeResponses = [
+          "Mira, no creo que eso tenga importancia ahora.",
+          "Prefiero no hablar de eso por ahora.",
+          "¿Podemos hablar de otra cosa?",
+        ];
+        return {
+          text: safeResponses[Math.floor(Math.random() * safeResponses.length)],
+          ms: Date.now() - t0,
+        };
+      }
+
       if (attempt < MAX_RETRIES) {
         await new Promise(r => setTimeout(r, 1000));
         continue;
       }
 
-      // Final fallback after all retries exhausted — in-character evasion,
-      // NOT flat refusal. The suspect deflects instead of shutting down.
+      // Final fallback — in-character evasion
       const fallbacks = [
         "Mira, no creo que eso tenga importancia ahora.",
         "¿Me puedes repetir la pregunta? Estaba distraído.",
@@ -126,7 +140,6 @@ export async function generateSuspectReply(
       return { text, ms: Date.now() - t0 };
     }
   }
-  // Should never reach here, but TypeScript needs it.
   return { text: "...", ms: Date.now() - t0 };
 }
 
@@ -144,7 +157,7 @@ export async function generateAutonomousEvent(
   recentContext: string,
   stressLevel: number
 ): Promise<AIEvent> {
-  const groq = getClient();
+  const genAI = getClient();
 
   let stressContext = "";
   if (stressLevel > 70) {
@@ -156,12 +169,9 @@ export async function generateAutonomousEvent(
   }
 
   try {
-    const completion = await groq.chat.completions.create({
+    const model = genAI.getGenerativeModel({
       model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content: `${systemPrompt}\n\n${stressContext}${SPANISH_INSTRUCTION}
+      systemInstruction: `${systemPrompt}\n\n${stressContext}${SPANISH_INSTRUCTION}
 
 Estás solo/a en la sala de interrogación. Los detectives están en silencio. Genera UN evento espontáneo:
 
@@ -176,17 +186,17 @@ COMMENT|<texto en español>
 NERVOUS|<texto en español>
 
 No añadas nada más.`,
-        },
-        {
-          role: "user",
-          content: `Contexto reciente: ${recentContext || "Silencio en la sala."}\n\n¿Qué haces?`,
-        },
-      ],
-      temperature: 0.85,
-      max_tokens: 80,
+      generationConfig: {
+        temperature: 0.85,
+        maxOutputTokens: 80,
+      },
     });
 
-    const raw = (completion.choices?.[0]?.message?.content ?? "").trim();
+    const result = await model.generateContent(
+      `Contexto reciente: ${recentContext || "Silencio en la sala."}\n\n¿Qué haces?`
+    );
+
+    const raw = (result.response.text() ?? "").trim();
     const match = raw.match(/^(THOUGHT|COMMENT|NERVOUS)\|(.+)$/i);
     if (!match) {
       return { kind: "thought", text: raw.slice(0, 80) || "...pensando." };
@@ -196,5 +206,65 @@ No añadas nada más.`,
   } catch (err) {
     console.error("[llm] generateAutonomousEvent failed:", err);
     return { kind: "thought", text: "..." };
+  }
+}
+
+/**
+ * Generate a case using Gemini (used by /api/generate-case).
+ * Returns raw text that should be JSON.parse'd by the caller.
+ */
+export async function generateCaseFromSeed(systemPrompt: string, seed: string): Promise<string> {
+  const t0 = Date.now();
+  const genAI = getClient();
+
+  try {
+    const model = genAI.getGenerativeModel({
+      model: MODEL,
+      generationConfig: {
+        temperature: 0.9,
+        maxOutputTokens: 4000,
+        responseMimeType: "application/json",
+      },
+    });
+
+    const result = await model.generateContent(systemPrompt + `\n\nGenera el caso para la semilla: ${seed}`);
+    const text = result.response.text()?.trim() ?? "";
+
+    if (!text) throw new Error("Empty response from Gemini");
+
+    return text;
+  } catch (err) {
+    const errMsg = (err as Error).message ?? "";
+    console.error(`[llm] generateCaseFromSeed failed:`, errMsg);
+
+    if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("QUOTA")) {
+      throw new Error("RATE_LIMITED");
+    }
+
+    throw err;
+  }
+}
+
+/**
+ * Judge evaluation using Gemini.
+ */
+export async function generateJudgeVerdict(systemPrompt: string, prompt: string): Promise<string> {
+  const genAI = getClient();
+
+  try {
+    const model = genAI.getGenerativeModel({
+      model: MODEL,
+      systemInstruction: systemPrompt,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 400,
+      },
+    });
+
+    const result = await model.generateContent(prompt);
+    return result.response.text()?.trim() ?? "";
+  } catch (err) {
+    console.error("[llm] generateJudgeVerdict failed:", err);
+    return "";
   }
 }
