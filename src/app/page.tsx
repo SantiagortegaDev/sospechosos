@@ -337,6 +337,8 @@ export default function Home() {
   const nervousnessRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const phaseRef = useRef<GamePhase>(phase);
   const lobbyPlayersRef = useRef(lobbyPlayers);
+  const timeRemainingRef = useRef(timeRemaining);
+  const totalTimeRef = useRef(totalTime);
   const seenMsgIds = useRef<Set<string>>(new Set());
   const interrogatingRef = useRef(false);
   /* Guards against duplicate game.start fetches when the host's retry
@@ -345,6 +347,8 @@ export default function Home() {
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { lobbyPlayersRef.current = lobbyPlayers; }, [lobbyPlayers]);
+  useEffect(() => { timeRemainingRef.current = timeRemaining; }, [timeRemaining]);
+  useEffect(() => { totalTimeRef.current = totalTime; }, [totalTime]);
 
   const channels = session ? channelIdsFor(session.roomCode) : null;
 
@@ -542,6 +546,15 @@ export default function Home() {
             // detectives use the same threshold.
             if (newPhase === "vote" && typeof payload.requiredVotes === "number") {
               setFrozenRequiredVotes(payload.requiredVotes as number);
+            }
+            // Sync timer when transitioning to playing phase so the non-host
+            // starts with the correct time (doesn't have to wait for the
+            // 5s game.timer broadcast).
+            if (newPhase === "playing") {
+              const t = payload.timeRemaining as number;
+              const tt = payload.totalTime as number;
+              if (typeof t === "number" && t > 0) setTimeRemaining(t);
+              if (typeof tt === "number" && tt > 0) setTotalTime(tt);
             }
           }
         }
@@ -745,9 +758,9 @@ export default function Home() {
   }, [phase, enterDeliberation]);
 
   /* Timer sync — host broadcasts timeRemaining every 5s so the non-host's
-   * clock stays in sync. The non-host's own ticking interval drifts because
-   * setInterval is not precise and because the non-host may start playing
-   * a moment after the host. This periodic sync corrects the drift. */
+   * clock stays in sync. Uses refs (not state) inside the interval so the
+   * effect doesn't restart every second when timeRemaining changes — that
+   * would reset the 5s interval and the broadcast would never fire. */
   useEffect(() => {
     if (phase !== "playing" || !session?.isHost) return;
     const syncTimer = setInterval(() => {
@@ -756,15 +769,15 @@ export default function Home() {
           type: "game.timer",
           content: {
             type: "game.timer",
-            timeRemaining,
-            totalTime,
+            timeRemaining: timeRemainingRef.current,
+            totalTime: totalTimeRef.current,
             timestamp: Date.now(),
           },
         });
       } catch { /* ignore */ }
     }, 5000);
     return () => clearInterval(syncTimer);
-  }, [phase, session?.isHost, timeRemaining, totalTime, sendGame]);
+  }, [phase, session?.isHost, sendGame]);
 
   /* Nervousness fluctuation during playing */
   useEffect(() => {
@@ -1063,9 +1076,19 @@ export default function Home() {
     setVotes([]); setHasVoted(false); setVoteChoice(""); setVoteReason(""); setAllVotesIn(false);
     setVerdict(null); setEnding(null); setRevelation(null);
     setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
+    const rt = roundTime * 60;
+    setTimeRemaining(rt);
+    setTotalTime(rt);
     setPhase("playing");
-    // Broadcast phase change so the other detective starts playing too.
-    try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "playing" } }); } catch { /* ignore */ }
+    // Broadcast phase change WITH the timer values so the non-host starts
+    // playing with the correct time immediately (doesn't have to wait 5s
+    // for the first game.timer sync broadcast).
+    try {
+      sendGame({
+        type: "game.phase",
+        content: { type: "game.phase", phase: "playing", timeRemaining: rt, totalTime: rt },
+      });
+    } catch { /* ignore */ }
     SFX.soundWhoosh();
   }, [currentCase, roundTime, sendGame]);
 
