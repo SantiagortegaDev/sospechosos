@@ -563,21 +563,23 @@
 .pixel-typing {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 .pixel-typing-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   background: #5ba4e8;
   box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.6);
-  animation: pixel-typing-bounce 1s steps(4) infinite;
+  opacity: 0.3;
+  animation: pixel-typing-pulse 1.2s ease-in-out infinite;
 }
-.pixel-typing-dot:nth-child(2) { animation-delay: 0.15s; }
-.pixel-typing-dot:nth-child(3) { animation-delay: 0.3s; }
+.pixel-typing-dot:nth-child(1) { animation-delay: 0s; }
+.pixel-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.pixel-typing-dot:nth-child(3) { animation-delay: 0.4s; }
 
-@keyframes pixel-typing-bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-  20%, 40% { transform: translateY(-4px); opacity: 1; }
+@keyframes pixel-typing-pulse {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+  30% { transform: translateY(-3px); opacity: 1; }
 }
 
 .pixel-typewriter-cursor {

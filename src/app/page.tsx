@@ -163,10 +163,37 @@ function getPhaseSteps(currentPhase: GamePhase): Array<{ key: string; label: str
 
 /** Defense-in-depth: coerce any value to a safe React-renderable string. */
 function safeRender(v: unknown): string {
-  if (typeof v === "string") return v;
+  if (typeof v === "string") return convertEmojiShortcodes(v);
   if (v === null || v === undefined) return "";
   try { return JSON.stringify(v); }
   catch { return String(v); }
+}
+
+/* Common emoji shortcodes → unicode. LLMs sometimes output :smile: instead
+ * of the actual emoji, which looks broken. This converts the most common
+ * ones so the UI always shows a real emoji. */
+const EMOJI_MAP: Record<string, string> = {
+  ":smile:": "😄", ":grin:": "😁", ":sad:": "😢", ":cry:": "😭",
+  ":angry:": "😠", ":rage:": "😡", ":fear:": "😨", ":sweat:": "😰",
+  ":thinking:": "🤔", ":neutral:": "😐", ":confused:": "😕",
+  ":wink:": "😉", ":joy:": "😂", ":rofl:": "🤣", ":cool:": "😎",
+  ":heart:": "❤", ":broken_heart:": "💔", ":fire:": "🔥", ":star:": "⭐",
+  ":check:": "✓", ":x:": "✗", ":warning:": "⚠", ":info:": "ℹ",
+  ":lock:": "🔒", ":key:": "🔑", ":door:": "🚪", ":eye:": "👁",
+  ":money:": "💰", ":bomb:": "💣", ":knife:": "🔪", ":gun:": "🔫",
+  ":pill:": "💊", ":syringe:": "💉", ":smoking:": "🚬", ":coffee:": "☕",
+  ":beer:": "🍺", ":wine:": "🍷", ":skull:": "💀", ":ghost:": "👻",
+  ":detective:": "🕵", ":cop:": "👮", ":judge:": "⚖", ":lawyer:": "⚖",
+  ":briefcase:": "💼", ":file:": "📄", ":page:": "📃", ":memo:": "📝",
+  ":phone:": "📞", ":email:": "📧", ":clock:": "🕐", ":hourglass:": "⏳",
+  ":bulb:": "💡", ":camera:": "📷", ":microscope:": "🔬", ":test_tube:": "🧪",
+  ":dna:": "🧬", ":bandage:": "🩹", ":tooth:": "🦷", ":bone:": "🦴",
+  ":magnifier:": "🔍", ":search:": "🔍", ":bookmark:": "🔖", ":link:": "🔗",
+  ":shield:": "🛡", ":crown:": "👑", ":ring:": "💍", ":gem:": "💎",
+};
+
+function convertEmojiShortcodes(text: string): string {
+  return text.replace(/:[a-z_]+:/gi, (match) => EMOJI_MAP[match.toLowerCase()] ?? match);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -329,6 +356,7 @@ export default function Home() {
   /* Achievements */
   const [unlockedAchievements, setUnlockedAchievements] = useState<Achievement[]>([]);
   const [achievementPopup, setAchievementPopup] = useState<Achievement | null>(null);
+  const [evidencePopup, setEvidencePopup] = useState<EvidenceItem | null>(null);
 
   /* Refs */
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -342,6 +370,7 @@ export default function Home() {
   const lobbyPlayersRef = useRef(lobbyPlayers);
   const timeRemainingRef = useRef(timeRemaining);
   const totalTimeRef = useRef(totalTime);
+  const verdictRef = useRef<typeof verdict>(verdict);
   const seenMsgIds = useRef<Set<string>>(new Set());
   const interrogatingRef = useRef(false);
   /* Guards against duplicate game.start fetches when the host's retry
@@ -352,6 +381,7 @@ export default function Home() {
   useEffect(() => { lobbyPlayersRef.current = lobbyPlayers; }, [lobbyPlayers]);
   useEffect(() => { timeRemainingRef.current = timeRemaining; }, [timeRemaining]);
   useEffect(() => { totalTimeRef.current = totalTime; }, [totalTime]);
+  useEffect(() => { verdictRef.current = verdict; }, [verdict]);
 
   const channels = session ? channelIdsFor(session.roomCode) : null;
 
@@ -542,7 +572,7 @@ export default function Home() {
 
         if (type === "game.phase") {
           const newPhase = payload.phase as GamePhase;
-          if ("playing,evidence_review,deliberation,vote,verdict,revelation,results".split(",").includes(newPhase)) {
+          if ("generating_case,playing,evidence_review,deliberation,vote,verdict,revelation,results".split(",").includes(newPhase)) {
             setPhase(newPhase);
             // Sync requiredVotes when transitioning to vote phase so both
             // detectives use the same threshold.
@@ -587,11 +617,24 @@ export default function Home() {
           const v = payload.verdict;
           const e = payload.ending;
           if (v) {
-            setVerdict(v);
-            setShakeKey((prev) => prev + 1);
-            if (e) setEnding(e);
-            setPhase("verdict");
-            setLoading(false);
+            // Only accept the verdict if we haven't progressed past it
+            // (revelation / results). The host's retry broadcasts (5 attempts)
+            // can arrive AFTER the user pressed "REVELAR LA VERDAD" and
+            // would yank them back to the verdict screen.
+            const pastVerdict = phaseRef.current === "revelation" || phaseRef.current === "results";
+            if (!pastVerdict) {
+              setVerdict(v);
+              setShakeKey((prev) => prev + 1);
+              if (e) setEnding(e);
+              setPhase("verdict");
+              setLoading(false);
+            } else {
+              // Still capture the verdict data in case we don't have it yet.
+              if (!verdictRef.current) {
+                setVerdict(v);
+                if (e) setEnding(e);
+              }
+            }
           }
         }
       } catch { /* ignore */ }
@@ -1032,8 +1075,10 @@ export default function Home() {
     if (!session?.isHost || !channels) return;
     try { await fetch(`/api/rooms/${session.roomCode}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start" }) }); } catch { /* ok */ }
     setPhase("generating_case");
+    // Broadcast phase change so the non-host also sees the "generating case" screen.
+    try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "generating_case" } }); } catch { /* ignore */ }
     SFX.soundWhoosh();
-  }, [session, channels]);
+  }, [session, channels, sendGame]);
 
   const handleCaseReady = useCallback(async (generated: GeneratedCase) => {
     rememberGender(generated.seed, generated.suspect.gender);
@@ -1081,6 +1126,13 @@ export default function Home() {
     setVotes([]); setHasVoted(false); setVoteChoice(""); setVoteReason(""); setAllVotesIn(false);
     setVerdict(null); setEnding(null); setRevelation(null);
     setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
+    // Reset ALL labels/state that could leak from a previous round.
+    setError(""); setChatDraft(""); setDetectiveDraft("");
+    setSuspectResponding(false); setOtherTyping(false);
+    setDetectiveUnreadCount(0); setEvidencePopup(null);
+    setFrozenRequiredVotes(1); setLobbyPlayers([]);
+    // Re-add ourselves to lobbyPlayers so the count is correct.
+    if (session) setLobbyPlayers([{ id: playerId, username: session.username, isHost: session.isHost }]);
     const rt = roundTime * 60;
     setTimeRemaining(rt);
     setTotalTime(rt);
@@ -1095,7 +1147,7 @@ export default function Home() {
       });
     } catch { /* ignore */ }
     SFX.soundWhoosh();
-  }, [currentCase, roundTime, sendGame]);
+  }, [currentCase, roundTime, sendGame, session, playerId]);
 
   /* ═══ TURN-BASED INTERROGATION ═══
    * With 2 detectives, one PROPOSES a question, the other can APPROVE / EDIT /
@@ -1143,6 +1195,12 @@ export default function Home() {
     }));
     if (unlockedIds.length > 0) {
       SFX.soundEvidenceUnlock();
+      // Show popup with the first unlocked evidence item.
+      const firstUnlocked = evidenceItems.find(ev => unlockedIds.includes(ev.id));
+      if (firstUnlocked) {
+        setEvidencePopup(firstUnlocked);
+        setTimeout(() => setEvidencePopup(null), 4000);
+      }
       // Broadcast evidence unlocks to the other detective.
       try {
         sendGame({ type: "evidence.unlock", content: { type: "evidence.unlock", ids: unlockedIds } });
@@ -1536,6 +1594,21 @@ export default function Home() {
     </div>
   ) : null;
 
+  const EvidencePopupOverlay = evidencePopup ? (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 achievement-popup">
+      <div className="pixel-frame p-4 max-w-sm" style={bodyFont}>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">📄</span>
+          <div>
+            <div className="text-xs font-bold text-[var(--primary)] tracking-wider">EVIDENCIA DESBLOQUEADA</div>
+            <div className="text-sm text-[var(--foreground)] font-bold mt-1">{safeRender(evidencePopup.label)}</div>
+            <div className="text-xs text-[var(--muted-foreground)] mt-0.5">{safeRender(evidencePopup.description)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   const TimeSlider = ({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled?: boolean }) => {
     const fillPercent = ((value - 3) / (15 - 3)) * 100;
     const marks = [3, 5, 7, 10, 15];
@@ -1665,7 +1738,7 @@ export default function Home() {
   if (showTutorial) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-md w-full p-6 space-y-5">
           <div className="pixel-header"><span>COMO JUGAR</span></div>
           <img src="/sospechosos-logo.png" alt="LOS SOSPECHOSOS" className="mx-auto w-full max-w-[280px] pixel-logo" draggable={false} />
@@ -1699,7 +1772,7 @@ export default function Home() {
   if (phase === "create_or_join") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-lg w-full p-6 space-y-6 pixel-scale-in">
           <div className="pixel-header"><span>SALA DE INTERROGACIÓN</span></div>
           <div className="grid gap-4 pixel-stagger">
@@ -1721,7 +1794,7 @@ export default function Home() {
   if (phase === "create") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-lg w-full p-6 space-y-5 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>CREAR SALA</span></div>
           {ErrorBanner}
@@ -1815,7 +1888,7 @@ export default function Home() {
   if (phase === "join") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-md w-full p-6 space-y-4 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>INGRESAR A SALA</span></div>
           {ErrorBanner}
@@ -1832,7 +1905,7 @@ export default function Home() {
   if (phase === "join_by_link") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-md w-full p-6 space-y-4 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>INVITACIÓN A SALA</span></div>
           <div className="text-center text-xs text-[var(--foreground)] tracking-wider">CÓDIGO: <span className="text-[var(--primary)] text-sm">{roomCode.toUpperCase()}</span></div>
@@ -1848,7 +1921,7 @@ export default function Home() {
   if (phase === "lobby") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4">
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-lg w-full p-6 space-y-6 pixel-scale-in" style={bodyFont}>
           <div className="pixel-header"><span>LOBBY // SALA: {roomCode.toUpperCase()}</span></div>
           <div className="text-center">
@@ -1909,7 +1982,7 @@ export default function Home() {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-6 select-none pixel-fade-in cursor-pointer"
         onClick={() => { if (caseIntroStep >= totalSteps - 1) { SFX.soundClick(); handleStartInterrogation(); } else { setCaseIntroStep(p => Math.min(p + 1, totalSteps - 1)); } }}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="max-w-2xl w-full space-y-5 text-center">
           {caseIntroStep >= 0 && (
             <div className={cn("transition-all duration-700", caseIntroStep === 0 ? "opacity-100 translate-y-0" : "opacity-40")}>
@@ -1968,7 +2041,7 @@ export default function Home() {
   if (phase === "evidence_review" && currentCase) {
     return (
       <div className="min-h-screen flex flex-col" style={bodyFont}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <header className="border-b-2 border-[var(--border)] bg-[var(--card)] px-4 py-3 flex items-center justify-between shrink-0">
           <div>
             <div className="text-sm font-bold text-[var(--primary)] tracking-widest" style={headFont}>REVISIÓN DE EVIDENCIA</div>
@@ -2097,9 +2170,9 @@ export default function Home() {
     const rightTabsContent = (() => {
       const tabList = [
         { key: "evidencia" as const, label: `EVIDENCIA (${unlockedCount}/${totalEvCount})` },
-        { key: "detectives" as const, label: detectiveUnreadCount > 0 && rightTab !== "detectives" ? `DETECTIVES (${detectiveUnreadCount})` : "DETECTIVES" },
+        { key: "detectives" as const, label: detectiveUnreadCount > 0 && rightTab !== "detectives" ? `DETECTIVES (${detectiveUnreadCount})` : "DETECTIVES", showTyping: otherTyping && rightTab !== "detectives" },
         { key: "herramientas" as const, label: "HERRAMIENTAS" },
-      ];
+      ] as const;
       return (
         <div className="flex flex-col h-full">
           {/* Tabs — larger, more readable, two-row wrap */}
@@ -2109,7 +2182,7 @@ export default function Home() {
                 key={tab.key}
                 onClick={() => { setRightTab(tab.key); SFX.soundTab(); if (tab.key === "detectives") setDetectiveUnreadCount(0); }}
                 className={cn(
-                  "px-2.5 py-2 text-[12px] tracking-wider transition-all cursor-pointer border-b-2",
+                  "px-2.5 py-2 text-[12px] tracking-wider transition-all cursor-pointer border-b-2 flex items-center gap-1.5",
                   rightTab === tab.key
                     ? "text-[var(--primary)] border-[var(--primary)] bg-[var(--primary)]/12 font-bold"
                     : "text-[var(--muted-foreground)] border-transparent hover:text-[var(--foreground)] hover:bg-[var(--accent)]/50"
@@ -2117,6 +2190,7 @@ export default function Home() {
                 style={bodyFont}
               >
                 {tab.label}
+                {"showTyping" in tab && tab.showTyping && <TypingIndicator />}
               </button>
             ))}
           </div>
@@ -2281,7 +2355,7 @@ export default function Home() {
 
     return (
       <div className="h-screen flex flex-col pixel-fade-in overflow-hidden" style={bodyFont}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <header className="border-b border-[var(--border)] bg-[var(--card)] px-2 sm:px-4 py-2 flex items-center justify-between shrink-0 gap-2">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <span className="text-[var(--primary)] pixel-live-dot shrink-0" />
@@ -2377,18 +2451,6 @@ export default function Home() {
                     <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">ESTRÉS MÁX</div>
                   </div>
                 </div>
-              </div>
-
-              {/* Case briefing — compact recap */}
-              <div className="pixel-frame p-3">
-                <div className="text-xs tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Resumen del caso</div>
-                <p className="text-[11px] text-[var(--foreground)] leading-relaxed">{safeRender(currentCase.briefing)}</p>
-                {currentCase.stakes && (
-                  <div className="mt-2 pt-2 border-t border-[var(--border)]">
-                    <div className="text-[10px] text-[var(--destructive)] tracking-wider font-bold">EN JUEGO</div>
-                    <div className="text-[11px] text-[var(--foreground)] leading-relaxed mt-0.5">{safeRender(currentCase.stakes)}</div>
-                  </div>
-                )}
               </div>
             </div>
           </aside>
@@ -2572,7 +2634,7 @@ export default function Home() {
     const unlockedEvidence = evidenceItems.filter((e) => !e.isLocked);
     return (
       <div className="h-screen flex flex-col overflow-hidden" style={bodyFont}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <header className="border-b-2 border-[var(--border)] bg-[var(--card)] px-4 py-3 flex items-center justify-between">
           <div><div className="text-sm font-bold text-[var(--primary)] tracking-widest" style={headFont}>DELIBERACIÓN</div><div className="text-xs text-[var(--muted-foreground)] tracking-wider">Discute con tu compañero antes de votar</div></div>
           <div className="flex items-center gap-3"><PhaseIndicator current="deliberation" /><div className="text-xl font-bold text-[var(--primary)]" style={headFont}>⏱ {formatTime(delibTimeRemaining)}</div></div>
@@ -2667,7 +2729,7 @@ export default function Home() {
     const flaggedAnswers = chatMessages.filter((m) => m.type === "suspect.answer" && m.flagged);
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4" style={bodyFont}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="pixel-frame max-w-2xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto pixel-scroll">
           <div className="pixel-header"><span>FASE DE VOTACIÓN</span></div>
           <div className="text-center">
@@ -2758,7 +2820,7 @@ export default function Home() {
   if (phase === "verdict") {
     return (
       <main className={cn("min-h-screen flex flex-col items-center justify-center p-4", shakeKey > 0 && "pixel-shake")} style={bodyFont}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="max-w-2xl w-full space-y-6 text-center">
           {loading ? (
             <div className="pixel-frame p-8 space-y-4"><div className="text-4xl">⚖</div><div className="text-sm text-[var(--primary)] tracking-widest animate-pulse" style={headFont}>LA JUEZA VALERIA CRUZ DELIBERA...</div></div>
@@ -2797,7 +2859,7 @@ export default function Home() {
               </div>
 
               <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider animate-pulse">¿ACERTARON O SE EQUIVOCARON? DESCÚBRELO ↓</div>
-              <button onClick={() => { setPhase("revelation"); generateRevelation(); }} className="pixel-btn py-3 px-8" style={headFont}>REVELAR LA VERDAD</button>
+              <button onClick={() => { setPhase("revelation"); generateRevelation(); try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "revelation" } }); } catch { /* ignore */ } }} className="pixel-btn py-3 px-8" style={headFont}>REVELAR LA VERDAD</button>
             </>
           ) : (
             <div className="pixel-frame p-6"><div className="text-xs text-[var(--destructive)]">Error: No se pudo obtener el veredicto.</div><button onClick={() => setPhase("results")} className="pixel-btn mt-4 px-4 py-2 text-xs">CONTINUAR</button></div>
@@ -2820,7 +2882,7 @@ export default function Home() {
 
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4" style={bodyFont}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="max-w-2xl w-full space-y-5 text-center">
           <div className="pixel-header"><span>LA VERDAD COMPLETA</span></div>
 
@@ -2894,7 +2956,7 @@ export default function Home() {
                 </div>
               )}
 
-              <button onClick={() => setPhase("results")} className="pixel-btn py-3 px-8" style={headFont}>VER RESULTADOS</button>
+              <button onClick={() => { setPhase("results"); try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "results" } }); } catch { /* ignore */ } }} className="pixel-btn py-3 px-8" style={headFont}>VER RESULTADOS</button>
             </>
           ) : (
             <div className="pixel-frame p-6"><div className="text-xs text-[var(--destructive)]">No se pudo generar la revelación.</div></div>
@@ -2914,7 +2976,7 @@ export default function Home() {
 
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4" style={bodyFont}>
-        {AchievementOverlay}
+        {AchievementOverlay}{EvidencePopupOverlay}
         <div className="max-w-2xl w-full space-y-6 text-center">
           {/* Rating */}
           <div className="pixel-frame p-6">
