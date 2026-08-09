@@ -5,7 +5,6 @@
  */
 
 import { getClient } from "./llm";
-import { SUSPECTS } from "./suspects";
 
 const JUDGE_SYSTEM_PROMPT = `Eres el JUEZ VALERIA CRUZ, una magistrada implacable con 30 años de experiencia. Has revisado TODA la evidencia de esta investigación.
 
@@ -36,7 +35,9 @@ export async function evaluateVote(
   suspectId: string,
   votes: Array<{ playerName: string; vote: "guilty" | "innocent"; reason: string }>,
   conversationSummary: string,
-  stressHistory: string
+  stressHistory: string,
+  suspectIsGuiltyOverride?: boolean,
+  suspectNameOverride?: string
 ): Promise<{
   majorityCorrect: boolean;
   suspectIsGuilty: boolean;
@@ -46,9 +47,9 @@ export async function evaluateVote(
   judgeReasoning: string;
   judgesComment: string;
 }> {
-  const suspect = SUSPECTS.find(s => s.id === suspectId);
-  const suspectName = suspect?.name || "Desconocido";
-  const actualGuilty = suspect?.isGuilty ?? false;
+  // Use the provided override (from generated cases) or fall back to false
+  const suspectName = suspectNameOverride || "Desconocido";
+  const actualGuilty = suspectIsGuiltyOverride ?? false;
 
   const guiltyCount = votes.filter(v => v.vote === "guilty").length;
   const innocentCount = votes.filter(v => v.vote === "innocent").length;

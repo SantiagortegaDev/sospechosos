@@ -182,6 +182,7 @@ export default function Home() {
 
   /* Case & intro */
   const [currentCase, setCurrentCase] = useState<CaseInfo | null>(null);
+  const [generatedCaseRaw, setGeneratedCaseRaw] = useState<GeneratedCase | null>(null);
   const [caseIntroStep, setCaseIntroStep] = useState(0);
 
   /* Timer */
@@ -403,7 +404,7 @@ export default function Home() {
       const res = await fetch("/api/judge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ suspectId: suspect.id, votes: votes.map((v) => ({ playerName: v.playerName, vote: v.vote, reason: v.reason })), conversationSummary: convSummary, stressHistory: stressSummary }),
+        body: JSON.stringify({ suspectId: suspect.id, suspectName: suspect.name, suspectIsGuilty: suspect.isGuilty, votes: votes.map((v) => ({ playerName: v.playerName, vote: v.vote, reason: v.reason })), conversationSummary: convSummary, stressHistory: stressSummary }),
       });
       const data = await res.json();
       setVerdict(data);
@@ -567,6 +568,7 @@ export default function Home() {
 
   const handleCaseReady = useCallback(async (generated: GeneratedCase) => {
     rememberGender(generated.seed, generated.suspect.gender);
+    setGeneratedCaseRaw(generated);
     const caseInfo = adaptGeneratedCase(generated);
     setCurrentCase(caseInfo);
     // Initialize evidence items
@@ -743,7 +745,7 @@ export default function Home() {
   }, [voteChoice, voteReason, session, playerId, sendGame]);
 
   const playAgain = useCallback(() => {
-    clearSession(); setSession(null); setRoomCode(""); setUsername(""); setCurrentCase(null);
+    clearSession(); setSession(null); setRoomCode(""); setUsername(""); setCurrentCase(null); setGeneratedCaseRaw(null);
     setChatMessages([]); setDetectiveMessages([]); setVotes([]); setHasVoted(false);
     setVerdict(null); setEnding(null); setUnlockedAchievements([]);
     setTimeRemaining(0); setTotalTime(0); setEvidenceItems([]);
@@ -763,29 +765,39 @@ export default function Home() {
     if (!currentCase) return;
     setRevelationLoading(true);
     try {
-      const res = await fetch("/api/generate-case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seed: currentCase.id.replace("gen_", "") }) });
-      if (res.ok) {
-        const gen = await res.json();
-        const s = gen.suspect;
+      // Use the stored raw generated case to build the revelation text.
+      // Do NOT re-call /api/generate-case — the in-memory cache may be lost
+      // on serverless cold starts, and temperature=0.9 means we'd get a
+      // completely different case.
+      if (generatedCaseRaw) {
+        const s = generatedCaseRaw.suspect;
         let rev = `=== LA VERDAD COMPLETA ===\n\n`;
         rev += `Sospechoso: ${s.name}\n`;
-        rev += `Responsabilidad: ${s.culpability === "guilty" ? "CULPABLE" : s.culpability === "innocent" ? "INOCENTE" : s.culpability === "accomplice" ? "CÓMPLICE" : "TESTIGO"}\n\n`;
-        rev += `LO QUE REALMENTE SUCEDIÓ:\n${s.truth}\n\n`;
+        rev += `Responsabilidad: ${s.culpability === "guilty" ? "CULPABLE" : s.culpability === "innocent" ? "INOCENTE" : s.culpability === "accomplice" ? "COMPLICE" : "TESTIGO"}\n\n`;
+        rev += `LO QUE REALMENTE SUCEDIO:\n${s.truth}\n\n`;
         if (s.alibi) { rev += `COARTADA (MENTIRA): ${s.alibi.claimed}\nCOARTADA (REAL): ${s.alibi.actual}\n\n`; }
-        if (gen.evidence) {
+        if (generatedCaseRaw.evidence) {
           rev += `EVIDENCIA:\n`;
-          for (const ev of gen.evidence) { rev += `  ${ev.isRedHerring ? "🔴 FALSA" : "🟢 REAL"}: ${ev.label} — ${ev.description}\n`; }
+          for (const ev of generatedCaseRaw.evidence) { rev += `  ${ev.isRedHerring ? "[FALSA]" : "[REAL]"}: ${ev.label} - ${ev.description}\n`; }
           rev += "\n";
         }
-        if (gen.timeline) {
-          rev += `LÍNEA TEMPORAL REAL:\n`;
-          for (const t of gen.timeline) { rev += `  [${t.time}] ${t.event}\n`; }
+        if (generatedCaseRaw.timeline) {
+          rev += `LINEA TEMPORAL REAL:\n`;
+          for (const t of generatedCaseRaw.timeline) { rev += `  [${t.time}] ${t.event}\n`; }
         }
         setRevelationText(rev);
+      } else {
+        // Fallback for hardcoded cases that have no generatedCaseRaw
+        const s = currentCase.suspect;
+        let rev = `=== LA VERDAD COMPLETA ===\n\n`;
+        rev += `Sospechoso: ${s.name}\n`;
+        rev += `Responsabilidad: ${s.isGuilty ? "CULPABLE" : "INOCENTE"}\n\n`;
+        if (currentCase.briefing) rev += `CASO: ${currentCase.briefing}\n\n`;
+        setRevelationText(rev);
       }
-    } catch { setRevelationText("No se pudo generar la revelación."); }
+    } catch { setRevelationText("No se pudo generar la revelacion."); }
     finally { setRevelationLoading(false); }
-  }, [currentCase]);
+  }, [currentCase, generatedCaseRaw]);
 
   /* ═══ SHARED UI ═══ */
 

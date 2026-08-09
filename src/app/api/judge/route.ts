@@ -8,7 +8,7 @@ import { evaluateVote } from "@/lib/ai/judge";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { suspectId, votes, conversationSummary, stressHistory } = body;
+    const { suspectId, suspectName, suspectIsGuilty, votes, conversationSummary, stressHistory } = body;
     if (!suspectId || !votes || !Array.isArray(votes)) {
       return NextResponse.json({ error: "missing_fields" }, { status: 400 });
     }
@@ -16,7 +16,9 @@ export async function POST(req: Request) {
       suspectId,
       votes,
       conversationSummary || "Sin resumen disponible.",
-      stressHistory || "Sin datos de estrés."
+      stressHistory || "Sin datos de estrés.",
+      typeof suspectIsGuilty === "boolean" ? suspectIsGuilty : undefined,
+      typeof suspectName === "string" ? suspectName : undefined
     );
     return NextResponse.json(verdict);
   } catch (err) {
