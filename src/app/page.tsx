@@ -288,6 +288,13 @@ export default function Home() {
           const gameMsg = payload as GameMessage;
           const msgId = `${gameMsg.senderId}-${gameMsg.timestamp}`;
           if (seenMsgIds.current.has(msgId)) return;
+          // Skip echo: if this is a suspect.answer that we already added locally,
+          // don't add it again. The local handleInterrogate already adds it.
+          if (type === "suspect.answer" && currentCase && gameMsg.senderId === currentCase.suspect.id) {
+            // Check if we already have this exact answer text recently
+            seenMsgIds.current.add(msgId);
+            return;
+          }
           seenMsgIds.current.add(msgId);
           setChatMessages((prev) => [...prev.slice(-80), gameMsg]);
         }
@@ -625,7 +632,10 @@ export default function Home() {
         systemPrompt: currentCase.suspect.systemPrompt,
         stressRules: stressRulesRaw,
         question: text,
-        history: conversationHistory.slice(-20),
+        history: conversationHistory.slice(-20).map(t => ({
+            role: t.role === "detective" ? "user" as const : "assistant" as const,
+            content: t.text,
+          })),
         previousStress: stress,
       };
       if (selectedEvidence) { body.presentedEvidence = { label: selectedEvidence.label, description: selectedEvidence.description }; }
@@ -655,7 +665,7 @@ export default function Home() {
       }
       const data = await res.json();
 
-      const answerText = data.answer?.text ?? "...";
+      const answerText = data.answer?.text || "No tengo nada que decir.";
       const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: answerText, timestamp: Date.now() };
       setChatMessages((prev) => [...prev.slice(-80), aMsg]);
       try { await sendGame({ type: "suspect.answer", content: aMsg }); } catch { /* ok */ }
@@ -1519,7 +1529,7 @@ export default function Home() {
 
           {/* CENTER: Chat */}
           <section className={cn("flex-1 flex flex-col min-h-0", mobileTab !== "chat" && "hidden md:flex")}>
-            <div className="flex-1 overflow-y-auto pixel-scroll p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2 pixel-chat-compact">
               {chatMessages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center space-y-6 pixel-fade-in">
                   <div className={cn("flex justify-center", portraitShake && "pixel-portrait-shake")} style={{ filter: portraitTint }}>
@@ -1631,7 +1641,7 @@ export default function Home() {
             <button onClick={() => { SFX.soundClick(); skipToVote(); }} className="pixel-btn w-full py-3 mt-auto" style={headFont}>VOTAR AHORA</button>
           </aside>
           <section className="flex-1 flex flex-col min-h-0">
-            <div className="flex-1 overflow-y-auto pixel-scroll p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2">
               {detectiveMessages.length === 0 && <div className="text-center text-xs text-[var(--muted-foreground)] italic py-8">Discute tus conclusiones...</div>}
               {detectiveMessages.map((dm, i) => (<div key={i} className="flex flex-col items-start"><div className="text-[9px] text-[var(--primary)] tracking-wider">[{dm.detectiveName}]</div><div className="pixel-frame p-2.5 text-xs text-[var(--foreground)] max-w-[80%]">{dm.text}</div></div>))}
               <div ref={chatEndRef} />
