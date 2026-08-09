@@ -451,6 +451,14 @@
 .pixel-scroll::-webkit-scrollbar-thumb { background: #2a2a33; border: 1px solid #3a3a44; }
 .pixel-scroll::-webkit-scrollbar-thumb:hover { background: #5ba4e8; }
 
+/* Hidden scrollbar — still scrollable but no visible bar. Used for chat
+   containers where the scrollbar looks cluttered on initial render. */
+.pixel-scroll-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.pixel-scroll-hide::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
 /* ═══ Welcome float — GPU accelerated, smooth ═══ */
 
 @keyframes pixel-float {

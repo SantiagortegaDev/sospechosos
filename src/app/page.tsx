@@ -857,7 +857,7 @@ export default function Home() {
           if (delibTimerRef.current) clearInterval(delibTimerRef.current);
           // Freeze the required vote count when the deliberation timer
           // expires and we auto-transition to the vote phase.
-          setFrozenRequiredVotes(Math.max(1, lobbyPlayersRef.current));
+          setFrozenRequiredVotes(Math.max(1, lobbyPlayersRef.current.length));
           setPhase("vote");
           // Broadcast phase change so both detectives transition together.
           try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "vote" } }); } catch { /* ignore */ }
@@ -1164,11 +1164,16 @@ export default function Home() {
       if (selectedEvidence) { body.presentedEvidence = { label: selectedEvidence.label, description: selectedEvidence.description }; }
       if (technique !== "neutral") { body.technique = technique; }
 
+      // Broadcast "suspect.responding" BEFORE the fetch so BOTH detectives
+      // see the typing indicator simultaneously while the API call is
+      // in-flight. Previously this was after the fetch, so the other
+      // detective never saw the indicator (the response arrived first).
+      try { sendGame({ type: "suspect.responding", content: { type: "suspect.responding" } }); } catch { /* ok */ }
+
       const res = await fetch("/api/interrogate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      try { await sendGame({ type: "suspect.responding", content: { type: "suspect.responding" } }); } catch { /* ok */ }
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        try { await sendGame({ type: "suspect.idle", content: { type: "suspect.idle" } }); } catch { /* ok */ }
+        try { sendGame({ type: "suspect.idle", content: { type: "suspect.idle" } }); } catch { /* ok */ }
         if (res.status === 429 || errBody.error === "rate_limited") {
           const rateLimitMsg: GameMessage = {
             type: "suspect.answer", senderType: "suspect", senderId: "system", senderName: "SISTEMA",
@@ -2179,15 +2184,20 @@ export default function Home() {
               <div className="flex flex-col" style={{ height: "calc(100vh - 220px)", minHeight: "260px" }}>
                 <div className="text-xs text-[var(--primary)] font-bold mb-2 flex items-center gap-2">
                   <span>CHAT PRIVADO — DETECTIVES</span>
-                  {otherTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic">(escribiendo...)</span>}
+                  {otherTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-1"><TypingIndicator /> escribiendo...</span>}
                 </div>
-                <div className="flex-1 pixel-scroll overflow-y-auto space-y-2 mb-2 border border-[var(--border)] p-2 min-h-[120px]">
+                <div className="flex-1 pixel-scroll-hide overflow-y-auto space-y-2 mb-2 border border-[var(--border)] p-2 min-h-[120px]">
                   {detectiveMessages.map((dm, i) => (
                     <div key={i} className={cn("text-xs", dm.detectiveId === playerId ? "text-right" : "text-left")}>
                       {dm.detectiveId !== playerId && <span className="text-[var(--primary)] font-bold">[{safeRender(dm.detectiveName)}]: </span>}
                       <span className="text-[var(--foreground)]">{safeRender(dm.text)}</span>
                     </div>
                   ))}
+                  {otherTyping && (
+                    <div className="text-left">
+                      <div className="inline-block pixel-frame p-2 text-xs text-[var(--muted-foreground)]"><TypingIndicator /></div>
+                    </div>
+                  )}
                   {detectiveMessages.length === 0 && <div className="text-xs text-[var(--muted-foreground)] italic text-center py-4">Sin mensajes privados</div>}
                 </div>
                 <form onSubmit={handleSendDetective} className="flex gap-2 shrink-0 items-stretch">
@@ -2327,7 +2337,7 @@ export default function Home() {
               {/* Known facts — card-based, more readable */}
               <div className="pixel-frame p-3">
                 <div className="text-xs tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Hechos conocidos</div>
-                <div className="space-y-2 pixel-scroll max-h-40 overflow-y-auto">
+                <div className="space-y-2 pixel-scroll-hide max-h-40 overflow-y-auto">
                   {suspect.knownFacts.map((f, i) => (
                     <div key={i} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
                       <span className="text-[var(--primary)] shrink-0">▸</span>
@@ -2336,12 +2346,47 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+
+              {/* Session stats — fills the sidebar with useful live data */}
+              <div className="pixel-frame p-3 space-y-2">
+                <div className="text-xs tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-1">Sesión</div>
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  <div className="border border-[var(--border)] p-1.5">
+                    <div className="text-sm font-bold text-[var(--primary)]" style={headFont}>{questionsAsked}</div>
+                    <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">PREGUNTAS</div>
+                  </div>
+                  <div className="border border-[var(--border)] p-1.5">
+                    <div className="text-sm font-bold text-[var(--destructive)]" style={headFont}>{flaggedCount}</div>
+                    <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">ADMITIDOS</div>
+                  </div>
+                  <div className="border border-[var(--border)] p-1.5">
+                    <div className="text-sm font-bold text-[var(--primary)]" style={headFont}>{unlockedCount}/{totalEvCount}</div>
+                    <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">EVIDENCIA</div>
+                  </div>
+                  <div className="border border-[var(--border)] p-1.5">
+                    <div className="text-sm font-bold text-[var(--destructive)]" style={headFont}>{maxStress}%</div>
+                    <div className="text-[10px] text-[var(--muted-foreground)] tracking-wider">ESTRÉS MÁX</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Case briefing — compact recap */}
+              <div className="pixel-frame p-3">
+                <div className="text-xs tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Resumen del caso</div>
+                <p className="text-[11px] text-[var(--foreground)] leading-relaxed">{safeRender(currentCase.briefing)}</p>
+                {currentCase.stakes && (
+                  <div className="mt-2 pt-2 border-t border-[var(--border)]">
+                    <div className="text-[10px] text-[var(--destructive)] tracking-wider font-bold">EN JUEGO</div>
+                    <div className="text-[11px] text-[var(--foreground)] leading-relaxed mt-0.5">{safeRender(currentCase.stakes)}</div>
+                  </div>
+                )}
+              </div>
             </div>
           </aside>
 
           {/* CENTER: Chat — constrained width so messages don't stretch */}
           <section className={cn("flex-1 flex flex-col min-h-0 bg-[var(--background)]", mobileTab !== "chat" && "hidden md:flex")}>
-            <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2 pixel-chat-compact max-w-3xl mx-auto w-full">
+            <div className="flex-1 overflow-y-auto pixel-scroll-hide p-3 space-y-2 pixel-chat-compact max-w-3xl mx-auto w-full">
               {chatMessages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center space-y-3 pixel-fade-in py-8">
                   <div className="text-3xl mb-2 opacity-50">{safeRender(suspect.avatar)}</div>
@@ -2433,8 +2478,8 @@ export default function Home() {
                     }
                   } catch { /* ignore */ }
                 }
-              }} className="pixel-input flex-1 text-xs min-w-0" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta...` : isMultiplayer ? "Propón una pregunta..." : "Pregunta al sospechoso..."} disabled={pending || turnState.status === "reviewing"} />
-              <button type="submit" disabled={pending || !chatDraft.trim() || turnState.status === "reviewing"} className="pixel-btn text-xs px-3 sm:px-4 shrink-0 self-stretch">{pending ? "..." : isMultiplayer ? "PROPONER" : "ENVIAR"}</button>
+              }} className="pixel-input flex-1 text-xs min-w-0" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta...` : isMultiplayer ? "Propón una pregunta..." : "Pregunta al sospechoso..."} disabled={pending || suspectResponding || turnState.status === "reviewing"} />
+              <button type="submit" disabled={pending || suspectResponding || !chatDraft.trim() || turnState.status === "reviewing"} className="pixel-btn text-xs px-3 sm:px-4 shrink-0 self-stretch">{pending || suspectResponding ? "..." : isMultiplayer ? "PROPONER" : "ENVIAR"}</button>
             </form>
           </section>
 
@@ -2555,10 +2600,13 @@ export default function Home() {
           {/* RIGHT — Detective private chat (restored for deliberation) */}
           <section className="flex-1 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--card)]">
-              <div className="text-xs text-[var(--primary)] font-bold tracking-wider">CHAT PRIVADO — DETECTIVES</div>
+              <div className="text-xs text-[var(--primary)] font-bold tracking-wider flex items-center gap-2">
+                <span>CHAT PRIVADO — DETECTIVES</span>
+                {otherTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic flex items-center gap-1"><TypingIndicator /> escribiendo...</span>}
+              </div>
               <div className="text-[10px] text-[var(--muted-foreground)] italic">Discutan sus conclusiones antes de votar</div>
             </div>
-            <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2">
+            <div className="flex-1 overflow-y-auto pixel-scroll-hide p-3 space-y-2">
               {detectiveMessages.length === 0 && <div className="text-center text-xs text-[var(--muted-foreground)] italic py-8">Sin mensajes todavía. Empieza la discusión...</div>}
               {detectiveMessages.map((dm, i) => (
                 <div key={i} className={cn("flex flex-col", dm.detectiveId === playerId ? "items-end" : "items-start")}>
@@ -2566,17 +2614,32 @@ export default function Home() {
                   <div className={cn("pixel-frame p-2.5 text-xs text-[var(--foreground)] max-w-[80%]", dm.detectiveId === playerId && "pixel-frame-active")}>{safeRender(dm.text)}</div>
                 </div>
               ))}
+              {otherTyping && (
+                <div className="flex items-start">
+                  <div className="pixel-frame p-2.5 text-xs text-[var(--muted-foreground)]">
+                    <TypingIndicator />
+                  </div>
+                </div>
+              )}
               <div ref={chatEndRef} />
             </div>
-            <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0">
+            <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0 items-stretch">
               <input
                 value={detectiveDraft}
-                onChange={(e) => setDetectiveDraft(e.target.value)}
-                className="pixel-input flex-1 text-xs"
+                onChange={(e) => {
+                  setDetectiveDraft(e.target.value);
+                  try {
+                    if (!typingBroadcastRef.current) {
+                      sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId } });
+                      typingBroadcastRef.current = setTimeout(() => { typingBroadcastRef.current = null; }, 1500);
+                    }
+                  } catch { /* ignore */ }
+                }}
+                className="pixel-input flex-1 text-xs min-w-0"
                 placeholder="Mensaje al otro detective..."
                 autoFocus
               />
-              <button type="submit" className="pixel-btn text-xs px-4 py-2">ENVIAR</button>
+              <button type="submit" className="pixel-btn text-xs px-4 py-2 shrink-0 self-stretch">ENVIAR</button>
             </form>
             <div className="md:hidden p-3 border-t-2 border-[var(--border)] bg-[var(--card)]">
               <button onClick={() => { SFX.soundClick(); skipToVote(); }} className="pixel-btn w-full py-3" style={headFont}>VOTAR AHORA</button>

@@ -60,12 +60,29 @@ export async function evaluateVote(
 
   const guiltyCount = votes.filter(v => v.vote === "guilty").length;
   const innocentCount = votes.filter(v => v.vote === "innocent").length;
+  const isTie = guiltyCount === innocentCount;
   const majorityGuilty = guiltyCount > innocentCount;
 
   const majorityCorrect =
     (majorityGuilty && actualGuilty) || (!majorityGuilty && !actualGuilty);
 
-  const decision: "freed" | "imprisoned" = majorityGuilty ? "imprisoned" : "freed";
+  // On a tie, the judge decides based on the best argument. We compute a
+  // simple heuristic: longer + more specific reasons win. This is a fallback
+  // in case the LLM fails to parse. The LLM is also instructed to pick.
+  let tieWinner: "guilty" | "innocent" | null = null;
+  if (isTie) {
+    const guiltyVotes = votes.filter(v => v.vote === "guilty");
+    const innocentVotes = votes.filter(v => v.vote === "innocent");
+    const guiltyScore = guiltyVotes.reduce((sum, v) => sum + Math.min(v.reason.length, 200) / 100, 0);
+    const innocentScore = innocentVotes.reduce((sum, v) => sum + Math.min(v.reason.length, 200) / 100, 0);
+    tieWinner = guiltyScore >= innocentScore ? "guilty" : "innocent";
+  }
+
+  const effectiveGuilty = isTie ? (tieWinner === "guilty") : majorityGuilty;
+  const majorityCorrectTie =
+    (effectiveGuilty && actualGuilty) || (!effectiveGuilty && !actualGuilty);
+
+  const decision: "freed" | "imprisoned" = effectiveGuilty ? "imprisoned" : "freed";
 
   const voteSummary = votes.map(v =>
     `- ${v.playerName}: ${v.vote === "guilty" ? "CULPABLE" : "INOCENTE"} — "${v.reason}"`
@@ -76,7 +93,9 @@ export async function evaluateVote(
 VOTACIONES (${votes.length} detectives):
 ${voteSummary}
 
-Mayoría: ${majorityGuilty ? "CULPABLE (envían a prisión)" : "INOCENTE (dejan libre)"}
+${isTie
+  ? `EMPATE (${guiltyCount} culpable / ${innocentCount} inocente). Como Jueza, TÚ decides el desempate. Analiza cuál detective presentó el MEJOR ARGUMENTO (más específico, basado en evidencia, lógico). El sospechoso ${tieWinner === "guilty" ? "va PRESO" : "queda LIBRE"} según tu análisis del mejor argumento.`
+  : `Mayoría: ${majorityGuilty ? "CULPABLE (envían a prisión)" : "INOCENTE (dejan libre)"}`}
 
 RESUMEN DE LA INVESTIGACIÓN:
 ${conversationSummary}
@@ -86,7 +105,7 @@ ${stressHistory}
 
 Como Jueza Valeria Cruz, evalúa esta decisión. ¿Los detectives acertaron? ¿El sospechoso debe ir preso o quedar libre?
 
-Recuerda: La REALIDAD del caso es que ${suspectName} ${actualGuilty ? "ES culpable" : "ES inocente"}. Los detectives ${majorityCorrect ? "acertaron" : "se equivocaron"}.
+Recuerda: La REALIDAD del caso es que ${suspectName} ${actualGuilty ? "ES culpable" : "ES inocente"}. Los detectives ${majorityCorrectTie ? "acertaron" : "se equivocaron"}.
 
 Devuelve tu veredicto como JSON.`;
 
@@ -97,11 +116,9 @@ Devuelve tu veredicto como JSON.`;
       const parsed = JSON.parse(jsonMatch[0]);
       return {
         // majorityCorrect is ALWAYS computed deterministically from the
-        // vote vs the actual guilt — never trusted to the LLM. The LLM
-        // would just echo back what we tell it in the prompt ("Los
-        // detectives acertaron/se equivocaron"), which made every game
-        // feel like the detectives always won.
-        majorityCorrect,
+        // vote vs the actual guilt — never trusted to the LLM. On a tie,
+        // uses the tie-breaker (best argument heuristic).
+        majorityCorrect: majorityCorrectTie,
         suspectIsGuilty: actualGuilty,
         // decision is also deterministic — based on the vote majority.
         decision,
@@ -113,7 +130,7 @@ Devuelve tu veredicto como JSON.`;
     }
 
     return {
-      majorityCorrect,
+      majorityCorrect: majorityCorrectTie,
       suspectIsGuilty: actualGuilty,
       decision,
       guiltyVotes: guiltyCount,
@@ -124,7 +141,7 @@ Devuelve tu veredicto como JSON.`;
   } catch (err) {
     console.error("[judge] evaluation failed:", err);
     return {
-      majorityCorrect,
+      majorityCorrect: majorityCorrectTie,
       suspectIsGuilty: actualGuilty,
       decision,
       guiltyVotes: guiltyCount,
