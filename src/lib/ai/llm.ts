@@ -6,6 +6,7 @@
 
 import "server-only";
 import Groq from "groq-sdk";
+import { rateLimitedCall } from "./rate-limiter";
 
 let _groq: Groq | null = null;
 
@@ -83,12 +84,14 @@ export async function generateSuspectReply(
   const MAX_RETRIES = 1;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await groq.chat.completions.create({
-        model: MODEL,
-        messages,
-        temperature: 0.7,
-        max_tokens: 250,
-      });
+      const response = await rateLimitedCall(() =>
+        groq.chat.completions.create({
+          model: MODEL,
+          messages,
+          temperature: 0.7,
+          max_tokens: 250,
+        })
+      );
 
       const text = response.choices[0]?.message?.content?.trim() ?? "No tengo nada más que decir.";
       return { text, ms: Date.now() - t0 };
@@ -139,16 +142,18 @@ export async function generateCaseFromSeed(systemPrompt: string, seed: string): 
   const groq = getClient();
 
   try {
-    const response = await groq.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: `Genera el caso para la semilla: ${seed}` },
-      ],
-      temperature: 0.9,
-      max_tokens: 4000,
-      response_format: { type: "json_object" },
-    });
+    const response = await rateLimitedCall(() =>
+      groq.chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Genera el caso para la semilla: ${seed}` },
+        ],
+        temperature: 0.9,
+        max_tokens: 4000,
+        response_format: { type: "json_object" },
+      })
+    );
 
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     if (!text) throw new Error("Empty response from Groq");
@@ -172,15 +177,17 @@ export async function generateJudgeVerdict(systemPrompt: string, prompt: string)
   const groq = getClient();
 
   try {
-    const response = await groq.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 400,
-    });
+    const response = await rateLimitedCall(() =>
+      groq.chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 400,
+      })
+    );
 
     return response.choices[0]?.message?.content?.trim() ?? "";
   } catch (err) {

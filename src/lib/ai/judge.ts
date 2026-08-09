@@ -2,7 +2,7 @@
  * AI Judge — only activates at the END of the game.
  * Evaluates the collective detective decision (vote results) and decides:
  * - If the suspect goes FREE or is IMPRISONED
- * Uses Gemini via Google AI Studio.
+ * Uses Groq (llama-3.3-70b-versatile) via rate-limited LLM wrapper.
  */
 
 import { generateJudgeVerdict } from "./llm";
