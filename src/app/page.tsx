@@ -588,28 +588,69 @@ export default function Home() {
     return () => { if (evidenceReviewTimerRef.current) clearInterval(evidenceReviewTimerRef.current); };
   }, [phase, evidenceReviewTime]);
 
-  /* AI tick */
+  /* AI tick — LOCAL ONLY, no API calls to save rate limit quota.
+   * Generates autonomous suspect events (thoughts, nervous tics) based
+   * on stress level. These are pre-written, not LLM-generated. */
+  const LOCAL_THOUGHTS = [
+    "¿Por qué siguen preguntando lo mismo?",
+    "Necesito calmarme... no puedo demostrar nerviosismo.",
+    "Si me preguntan sobre esa noche, debo mantener mi historia.",
+    "Esto está tardando demasiado...",
+    "¿Estarán creyéndome?",
+    "No debería haber dicho eso antes.",
+    "Una pregunta más y podré salir de aquí.",
+    "Estoy sudando demasiado, seguro se nota.",
+    "¿Saben algo que yo no?",
+    "Debo mantener la calma.",
+    "Mi historia es sólida, no tienen nada contra mí.",
+    "¿Esa pregunta fue una trampa?",
+  ];
+  const LOCAL_NERVOUS = [
+    "Se le ve un temblor en las manos.",
+    "Evita el contacto visual por unos segundos.",
+    "Se seca la boca nerviosamente.",
+    "Tapa brevemente su boca con la mano.",
+    "Ajusta su posición incómodamente en la silla.",
+    "Se le tensa la mandíbula visiblemente.",
+    "Mira hacia la puerta como buscando una salida.",
+    "Se cruza y descruza los brazos repetidamente.",
+  ];
+  const LOCAL_COMMENTS = [
+    "¿Ya vamos a terminar con esto?",
+    "¿Puedo tomar agua?",
+    "No tengo nada más que agregar sobre eso.",
+    "Estoy cansado de repetir lo mismo.",
+    "¿Podemos hacer una pausa?",
+    "No sé qué más quieren que diga.",
+  ];
+
   useEffect(() => {
     if (phase !== "playing" || !currentCase) return;
-    const runTick = async () => {
+    const runTick = () => {
       if (phaseRef.current !== "playing") return;
-      try {
-        const historySlice = conversationHistory.slice(-20);
-        const context = historySlice.map((t) => `${t.role === "detective" ? "Detective" : "Sospechoso"}: ${t.text}`).join("\n") || "La sala está en silencio.";
-        const res = await fetch("/api/ai-tick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suspectId: currentCase.suspect.id, suspectName: currentCase.suspect.name, suspectAvatar: currentCase.suspect.avatar, systemPrompt: currentCase.suspect.systemPrompt, recentContext: context, stressLevel: stress.stress }) });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.skipped || !data.event) return;
-        const evt = data.event;
-        if (channels && sendGame) {
-          try { await sendGame({ type: "ai.event", content: { type: "ai.event", suspectId: evt.suspectId, suspectName: evt.suspectName, kind: evt.kind, text: evt.text, timestamp: Date.now() } }); } catch { /* ok */ }
-        }
-      } catch (err) { console.error("[ai-tick] failed:", err); }
+      // Only fire ~30% of the time to keep it sparse
+      if (Math.random() > 0.35) return;
+      const s = stress.stress;
+      const kind = s > 70 ? (Math.random() > 0.5 ? "nervous" : "comment") : "thought";
+      let text: string;
+      if (kind === "nervous") {
+        text = LOCAL_NERVOUS[Math.floor(Math.random() * LOCAL_NERVOUS.length)];
+      } else if (kind === "comment") {
+        text = LOCAL_COMMENTS[Math.floor(Math.random() * LOCAL_COMMENTS.length)];
+      } else {
+        text = LOCAL_THOUGHTS[Math.floor(Math.random() * LOCAL_THOUGHTS.length)];
+      }
+      const evt = { kind, text };
+      if (channels && sendGame) {
+        try {
+          sendGame({ type: "ai.event", content: { type: "ai.event", suspectId: currentCase.suspect.id, suspectName: currentCase.suspect.name, kind: evt.kind, text: evt.text, timestamp: Date.now() } });
+        } catch { /* ok */ }
+      }
     };
-    const firstTimeout = setTimeout(runTick, 5000);
+    const firstTimeout = setTimeout(runTick, 8000);
     const tickInterval = setInterval(() => { if (phaseRef.current === "playing") runTick(); }, AI_TICK_MS);
     return () => { clearTimeout(firstTimeout); clearInterval(tickInterval); };
-  }, [phase, currentCase, channels, sendGame, conversationHistory, stress.stress]);
+  }, [phase, currentCase, channels, sendGame, stress.stress]);
 
   /* Check all votes in — solo player proceeds immediately */
   const requiredVotes = Math.max(1, lobbyPlayers.length);
@@ -779,11 +820,11 @@ export default function Home() {
             senderType: "suspect",
             senderId: "system",
             senderName: "SISTEMA",
-            text: "[Límite de Gemini alcanzado. El sospechoso guarda silencio. Espera unos minutos o usa una seed ya generada.]",
+            text: "[Límite de la API alcanzado. El sospechoso guarda silencio. Espera unos minutos.]",
             timestamp: Date.now(),
           };
           setChatMessages((prev) => [...prev.slice(-80), rateLimitMsg]);
-          setError("Límite de Gemini alcanzado — espera unos minutos o usa una seed ya generada.");
+          setError("Límite de API alcanzado — espera unos minutos.");
           SFX.soundError();
           return;
         }

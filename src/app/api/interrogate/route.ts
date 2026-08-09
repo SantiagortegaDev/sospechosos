@@ -146,7 +146,7 @@ export async function POST(req: Request) {
       {
         error: "rate_limited",
         detail:
-          "Límite de Gemini alcanzado. Espera unos minutos o usa una seed ya generada. Mientras tanto, el sospechoso guarda silencio.",
+          "Límite de Groq alcanzado. Espera unos minutos. Mientras tanto, el sospechoso guarda silencio.",
       },
       { status: 429 }
     );

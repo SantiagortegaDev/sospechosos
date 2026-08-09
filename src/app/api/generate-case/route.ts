@@ -4,7 +4,7 @@
  * Body: { seed: string }
  *
  * Returns: GeneratedCase (see src/lib/ai/generated-case.ts).
- * Uses Gemini via Google AI Studio.
+ * Uses Groq (llama-3.3-70b-versatile) — free tier 30 rpm.
  */
 
 import { NextResponse } from "next/server";
@@ -159,7 +159,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error: "rate_limited",
-          detail: "Límite de Gemini alcanzado. Espera unos minutos o usa otra seed ya generada.",
+          detail: "Límite de Groq alcanzado. Espera unos minutos o usa otra seed ya generada.",
         },
         { status: 429 }
       );
