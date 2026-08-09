@@ -210,7 +210,7 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack }: Props)
                         : "text-[var(--muted-foreground)]"
                     )}
                   >
-                    {isDone ? "✓" : isCurrent ? "▮" : "·"}
+                    {isDone ? "[OK]" : isCurrent ? "[>]" : "-"}
                   </span>
                   <span
                     className={cn(

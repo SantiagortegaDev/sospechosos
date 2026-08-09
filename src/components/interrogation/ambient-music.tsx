@@ -11,7 +11,7 @@
  * or the TTS voice.
  *
  * Mute state is shared with the sound engine's mute flag. When the user
- * mutes (via the 🔊/🔇 button in the playing header), the music also stops.
+ * mutes (via the sound button in the playing header), the music also stops.
  */
 
 import { useEffect, useRef, useState } from "react";

@@ -205,7 +205,7 @@ export function InterrogationFeed({
                 >
                   {a.flagged && (
                     <div className="text-[9px] tracking-[0.2em] text-red-500 mb-1">
-                      ⚠ ADMISSION DETECTED
+                      [!] ADMISSION DETECTED
                     </div>
                   )}
                   {a.text}

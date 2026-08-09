@@ -167,7 +167,7 @@ export async function POST(req: Request) {
       text: reply.text,
       suspectId: body.suspectId,
       suspectName: body.suspectName ?? "SOSPECHOSO",
-      avatar: body.suspectAvatar ?? "👤",
+      avatar: body.suspectAvatar ?? "[?]",
       flagged,
     },
     stress: displayStress,

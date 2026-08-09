@@ -157,7 +157,7 @@ function Field({
       />
       <p className="text-[10px] text-muted-foreground leading-snug">{hint}</p>
       {error && (
-        <p className="text-[10px] text-red-500 tracking-wider">⚠ {error}</p>
+        <p className="text-[10px] text-red-500 tracking-wider">[!] {error}</p>
       )}
     </div>
   );

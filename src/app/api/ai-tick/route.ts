@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       event: {
         suspectId: suspectId ?? "unknown",
         suspectName: suspectName ?? "SOSPECHOSO",
-        avatar: suspectAvatar ?? "👤",
+        avatar: suspectAvatar ?? "[?]",
         kind: event.kind,
         text: event.text,
       },
