@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { getClient } from "@/lib/ai/llm";
 import type { GeneratedCase } from "@/lib/ai/generated-case";
+import { deepSanitize } from "@/lib/ai/deep-sanitize";
 
 const MODEL = "llama-3.1-8b-instant";
 
@@ -115,6 +116,10 @@ export async function POST(req: Request) {
         { status: 502 }
       );
     }
+
+    // Deep sanitize ALL fields — LLMs sometimes return objects where strings are expected.
+    // This prevents React #310 "Objects are not valid as a React child".
+    deepSanitize(parsed);
 
     parsed.seed = seed;
 

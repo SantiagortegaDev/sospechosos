@@ -3,6 +3,7 @@ import { Press_Start_2P, VT323, Silkscreen, Pixelify_Sans } from "next/font/goog
 import "./globals.css";
 import { PortalClientProvider } from "@/components/interrogation/portal-client-provider";
 import { AmbientMusic } from "@/components/interrogation/ambient-music";
+import { GameErrorBoundary } from "@/components/game-error-boundary";
 
 // Headings grandes — títulos principales (poco texto, mucho impacto)
 const pressStart2P = Press_Start_2P({
@@ -55,7 +56,7 @@ export default function RootLayout({
         style={{ fontFamily: "var(--font-pixel-ui), var(--font-pixel-body), monospace" }}
       >
         <AmbientMusic />
-        <PortalClientProvider>{children}</PortalClientProvider>
+        <PortalClientProvider><GameErrorBoundary>{children}</GameErrorBoundary></PortalClientProvider>
       </body>
     </html>
   );
