@@ -409,8 +409,16 @@ export default function Home() {
           }));
         }
         if (type === "question.approve") {
-          // The other detective approved — send the question.
-          setTurnState((prev) => ({ ...prev, status: "approved" as const }));
+          // The other detective approved. ONLY the proposer runs the
+          // interrogation (the approver just resets state). This prevents
+          // duplicate messages from both detectives calling the API.
+          setTurnState((cur) => {
+            if (cur.proposerId === playerId && cur.proposedText) {
+              const text = cur.proposedText;
+              setTimeout(() => runInterrogation(text), 0);
+            }
+            return { status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null };
+          });
         }
         if (type === "question.reject") {
           setTurnState((prev) => ({ ...prev, status: "idle" as const, proposedText: "", proposerId: null, proposerName: null }));
@@ -530,7 +538,22 @@ export default function Home() {
           const newPhase = payload.phase as GamePhase;
           if ("playing,evidence_review,deliberation,vote,verdict,revelation,results".split(",").includes(newPhase)) {
             setPhase(newPhase);
+            // Sync requiredVotes when transitioning to vote phase so both
+            // detectives use the same threshold.
+            if (newPhase === "vote" && typeof payload.requiredVotes === "number") {
+              setFrozenRequiredVotes(payload.requiredVotes as number);
+            }
           }
+        }
+
+        // Timer sync — host broadcasts timeRemaining every 5s. Non-host
+        // accepts the value to keep the clock in sync. Host ignores its
+        // own echoes (it's the source of truth).
+        if (type === "game.timer" && !session?.isHost) {
+          const t = payload.timeRemaining as number;
+          const tt = payload.totalTime as number;
+          if (typeof t === "number" && t >= 0) setTimeRemaining(t);
+          if (typeof tt === "number" && tt > 0) setTotalTime(tt);
         }
 
         if (type === "vote.cast") {
@@ -539,6 +562,22 @@ export default function Home() {
             if (prev.some((v) => v.playerId === vp.playerId)) return prev;
             return [...prev, { playerId: vp.playerId, playerName: vp.playerName, vote: vp.vote, reason: vp.reason, votedAt: vp.votedAt }];
           });
+        }
+
+        // Verdict broadcast — host computed the verdict via the judge API
+        // and broadcasts it. Non-host receives it and jumps to the verdict
+        // screen without calling the API (avoids duplicate calls + ensures
+        // both detectives see the same result).
+        if (type === "game.verdict") {
+          const v = payload.verdict;
+          const e = payload.ending;
+          if (v) {
+            setVerdict(v);
+            setShakeKey((prev) => prev + 1);
+            if (e) setEnding(e);
+            setPhase("verdict");
+            setLoading(false);
+          }
         }
       } catch { /* ignore */ }
     },
@@ -621,6 +660,15 @@ export default function Home() {
 
   const callJudge = useCallback(async () => {
     if (!currentCase || votes.length === 0) return;
+    // Only the host calls the judge API. The non-host waits for the
+    // game.verdict broadcast. This prevents both detectives from making
+    // duplicate API calls (which wastes rate limit quota) and ensures
+    // both see the same verdict.
+    if (!session?.isHost) {
+      setPhase("verdict");
+      setLoading(true);
+      return;
+    }
     setPhase("verdict");
     setLoading(true);
     try {
@@ -649,13 +697,25 @@ export default function Home() {
       if (!data.majorityCorrect) unlockAchievement("wrong_verdict");
       if (isUnanimous && data.majorityCorrect) unlockAchievement("unanimous");
       if (lobbyPlayers.length === 1 && data.majorityCorrect) unlockAchievement("lobo_solitario");
+
+      // Broadcast the verdict + ending to the non-host with retry.
+      const broadcastVerdict = (attempt: number) => {
+        try {
+          sendGame({
+            type: "game.verdict",
+            content: { type: "game.verdict", verdict: data, ending: end },
+          });
+        } catch { /* ignore */ }
+        if (attempt < 5) setTimeout(() => broadcastVerdict(attempt + 1), 400 * (attempt + 1));
+      };
+      broadcastVerdict(0);
     } catch (err) {
       console.error("[judge] failed:", err);
       setError("Error del juez. Veredicto pendiente.");
     } finally {
       setLoading(false);
     }
-  }, [currentCase, votes, conversationHistory, stress, maxStress, lobbyPlayers.length, questionsAsked, timeRemaining, totalTime, unlockAchievement]);
+  }, [currentCase, votes, conversationHistory, stress, maxStress, lobbyPlayers.length, questionsAsked, timeRemaining, totalTime, unlockAchievement, session?.isHost, sendGame]);
 
   /* ═══ EFFECTS ═══ */
 
@@ -683,6 +743,28 @@ export default function Home() {
     }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [phase, enterDeliberation]);
+
+  /* Timer sync — host broadcasts timeRemaining every 5s so the non-host's
+   * clock stays in sync. The non-host's own ticking interval drifts because
+   * setInterval is not precise and because the non-host may start playing
+   * a moment after the host. This periodic sync corrects the drift. */
+  useEffect(() => {
+    if (phase !== "playing" || !session?.isHost) return;
+    const syncTimer = setInterval(() => {
+      try {
+        sendGame({
+          type: "game.timer",
+          content: {
+            type: "game.timer",
+            timeRemaining,
+            totalTime,
+            timestamp: Date.now(),
+          },
+        });
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(syncTimer);
+  }, [phase, session?.isHost, timeRemaining, totalTime, sendGame]);
 
   /* Nervousness fluctuation during playing */
   useEffect(() => {
@@ -1184,11 +1266,14 @@ export default function Home() {
 
   const handleApproveProposal = useCallback(() => {
     if (turnState.status !== "reviewing" || !turnState.proposedText) return;
+    // The approver does NOT run the interrogation locally — only the
+    // proposer does (after receiving question.approve). This prevents
+    // duplicate messages: both detectives calling runInterrogation for
+    // the same question would create two API calls and two suspect
+    // answers, resulting in doubled chat messages.
     try { sendGame({ type: "question.approve", content: { type: "question.approve" } }); } catch { /* ignore */ }
-    const text = turnState.proposedText;
     setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
-    runInterrogation(text);
-  }, [turnState, sendGame, runInterrogation]);
+  }, [turnState, sendGame]);
 
   const handleRejectProposal = useCallback(() => {
     try { sendGame({ type: "question.reject", content: { type: "question.reject" } }); } catch { /* ignore */ }
@@ -1204,25 +1289,39 @@ export default function Home() {
   }, [turnState.status, sendGame]);
 
   // Consenso timer — auto-approve after 10s if nobody objects.
+  // Only the PROPOSER runs the interrogation when the timer expires.
+  // The approver just resets the state (the proposer will broadcast
+  // suspect.answer + stress.update afterwards).
   useEffect(() => {
     if (turnState.status !== "reviewing" || !turnState.timerEndsAt) return;
     const remaining = turnState.timerEndsAt - Date.now();
     if (remaining <= 0) {
-      handleApproveProposal();
+      // Timer already expired. Only the proposer sends.
+      if (turnState.proposerId === playerId && turnState.proposedText) {
+        const text = turnState.proposedText;
+        setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
+        runInterrogation(text);
+      } else {
+        setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
+      }
       return;
     }
     const t = setTimeout(() => {
       setTurnState((cur) => {
-        if (cur.status === "reviewing" && cur.proposedText) {
-          const text = cur.proposedText;
-          runInterrogation(text);
+        if (cur.status === "reviewing") {
+          // Only the proposer executes the interrogation.
+          if (cur.proposerId === playerId && cur.proposedText) {
+            const text = cur.proposedText;
+            // Defer runInterrogation so the state reset happens first.
+            setTimeout(() => runInterrogation(text), 0);
+          }
           return { status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null };
         }
         return cur;
       });
     }, remaining);
     return () => clearTimeout(t);
-  }, [turnState.status, turnState.timerEndsAt, handleApproveProposal, runInterrogation]);
+  }, [turnState.status, turnState.timerEndsAt, turnState.proposerId, turnState.proposedText, playerId, runInterrogation]);
 
   /* (Legacy handleInterrogate body removed — replaced by runInterrogation above.) */
 
@@ -1248,17 +1347,26 @@ export default function Home() {
     if (delibTimerRef.current) clearInterval(delibTimerRef.current);
     // Freeze the required vote count at this moment so late lobby.join
     // broadcasts don't change the threshold mid-vote.
-    setFrozenRequiredVotes(Math.max(1, lobbyPlayers.length));
+    const req = Math.max(1, lobbyPlayers.length);
+    setFrozenRequiredVotes(req);
     setPhase("vote");
-    // Broadcast phase change so the other detective transitions too.
-    try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "vote" } }); } catch { /* ignore */ }
+    // Broadcast phase change with requiredVotes so the non-host uses the
+    // same threshold (avoids the host thinking 2 votes needed while the
+    // non-host thinks 1).
+    try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "vote", requiredVotes: req } }); } catch { /* ignore */ }
   }, [lobbyPlayers.length, sendGame]);
 
   const handleSubmitVote = useCallback(async () => {
     if (!voteChoice || !session) return;
     const vote: DetectiveVote = { playerId, playerName: session.username, vote: voteChoice, reason: voteReason.trim(), votedAt: Date.now() };
     setVotes((prev) => [...prev, vote]); setHasVoted(true);
-    try { await sendGame({ type: "vote.cast", content: { ...vote, type: "vote.cast" } }); } catch { /* ok */ }
+    // Broadcast vote with retry — the other detective MUST receive it,
+    // otherwise they'll wait forever for a vote that never arrives.
+    const broadcastVote = (attempt: number) => {
+      try { sendGame({ type: "vote.cast", content: { ...vote, type: "vote.cast" } }); } catch { /* ignore */ }
+      if (attempt < 5) setTimeout(() => broadcastVote(attempt + 1), 400 * (attempt + 1));
+    };
+    broadcastVote(0);
     SFX.soundVerdict();
   }, [voteChoice, voteReason, session, playerId, sendGame]);
 
@@ -2128,7 +2236,7 @@ export default function Home() {
     })();
 
     return (
-      <div className="min-h-screen flex flex-col pixel-fade-in" style={bodyFont}>
+      <div className="h-screen flex flex-col pixel-fade-in overflow-hidden" style={bodyFont}>
         {AchievementOverlay}
         <header className="border-b border-[var(--border)] bg-[var(--card)] px-2 sm:px-4 py-2 flex items-center justify-between shrink-0 gap-2">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
@@ -2351,7 +2459,7 @@ export default function Home() {
   if (phase === "deliberation") {
     const unlockedEvidence = evidenceItems.filter((e) => !e.isLocked);
     return (
-      <div className="min-h-screen flex flex-col" style={bodyFont}>
+      <div className="h-screen flex flex-col overflow-hidden" style={bodyFont}>
         {AchievementOverlay}
         <header className="border-b-2 border-[var(--border)] bg-[var(--card)] px-4 py-3 flex items-center justify-between">
           <div><div className="text-sm font-bold text-[var(--primary)] tracking-widest" style={headFont}>DELIBERACIÓN</div><div className="text-xs text-[var(--muted-foreground)] tracking-wider">Discute con tu compañero antes de votar</div></div>
