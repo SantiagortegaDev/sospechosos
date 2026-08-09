@@ -750,13 +750,19 @@ export default function Home() {
     setVerdict(null); setEnding(null); setUnlockedAchievements([]);
     setTimeRemaining(0); setTotalTime(0); setEvidenceItems([]);
     setRevelationText("");
+    // Reset welcome screen state so the flash animation doesn't get stuck
+    // and the mount animation replays cleanly.
+    setWelcomeFlash(false);
+    setWelcomeMounted(false);
     setPhase("welcome");
   }, []);
 
   const leaveRoom = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (delibTimerRef.current) clearInterval(delibTimerRef.current);
-    clearSession(); setSession(null); setRoomCode(""); setUsername(""); setPhase("welcome");
+    clearSession(); setSession(null); setRoomCode(""); setUsername("");
+    setWelcomeFlash(false); setWelcomeMounted(false);
+    setPhase("welcome");
   }, []);
 
   const copyInviteLink = useCallback(() => { navigator.clipboard.writeText(`${window.location.origin}?room=${roomCode}`).catch(() => {}); }, [roomCode]);
@@ -1673,20 +1679,72 @@ export default function Home() {
 
   /* ═══ RENDER: VOTE ═══ */
   if (phase === "vote") {
+    const unlockedEvidence = evidenceItems.filter((e) => !e.isLocked);
+    const flaggedAnswers = chatMessages.filter((m) => m.type === "suspect.answer" && m.flagged);
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-4" style={bodyFont}>
         {AchievementOverlay}
-        <div className="pixel-frame max-w-lg w-full p-6 space-y-6">
+        <div className="pixel-frame max-w-2xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto pixel-scroll">
           <div className="pixel-header"><span>FASE DE VOTACIÓN</span></div>
           <div className="text-center">
             <div className="text-sm font-bold text-[var(--primary)] tracking-widest" style={headFont}>¿Es {currentCase?.suspect.name} culpable o inocente?</div>
-            <div className="text-xs text-[var(--muted-foreground)] mt-1">Tu voto es definitivo.</div>
+            <div className="text-xs text-[var(--muted-foreground)] mt-1">Tu voto es definitivo. Revisa tu evidencia antes de decidir.</div>
           </div>
+
+          {/* Evidence + stats summary so detectives can make an informed vote */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="pixel-frame p-2 text-center">
+              <div className="text-[9px] text-[var(--muted-foreground)] tracking-wider">PREGUNTAS</div>
+              <div className="text-lg font-bold text-[var(--primary)]">{questionsAsked}</div>
+            </div>
+            <div className="pixel-frame p-2 text-center">
+              <div className="text-[9px] text-[var(--muted-foreground)] tracking-wider">ESTRÉS MÁX</div>
+              <div className="text-lg font-bold text-[var(--destructive)]">{maxStress}%</div>
+            </div>
+            <div className="pixel-frame p-2 text-center">
+              <div className="text-[9px] text-[var(--muted-foreground)] tracking-wider">ADMITIDOS</div>
+              <div className="text-lg font-bold text-[var(--destructive)]">{flaggedCount}</div>
+            </div>
+            <div className="pixel-frame p-2 text-center">
+              <div className="text-[9px] text-[var(--muted-foreground)] tracking-wider">EVIDENCIA</div>
+              <div className="text-lg font-bold text-[var(--primary)]">{unlockedEvidence.length}/{evidenceItems.length}</div>
+            </div>
+          </div>
+
+          {/* Evidence list */}
+          {unlockedEvidence.length > 0 && (
+            <div className="pixel-frame p-3">
+              <div className="text-[10px] tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Evidencia recolectada</div>
+              <div className="space-y-2 max-h-40 overflow-y-auto pixel-scroll">
+                {unlockedEvidence.map((ev) => (
+                  <div key={ev.id} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
+                    <span className="text-[var(--primary)] shrink-0">▸</span>
+                    <span><strong className="text-[var(--primary)]">{ev.label}:</strong> {ev.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Flagged admissions — key evidence for the vote */}
+          {flaggedAnswers.length > 0 && (
+            <div className="pixel-frame p-3 border-[var(--destructive)]/40">
+              <div className="text-[10px] tracking-[0.18em] text-[var(--destructive)] uppercase mb-2">⚠ Admisiones detectadas</div>
+              <div className="space-y-1.5 max-h-32 overflow-y-auto pixel-scroll">
+                {flaggedAnswers.map((m, i) => (
+                  <div key={i} className="text-xs text-[var(--foreground)] italic leading-relaxed">
+                    "{m.text}"
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {hasVoted ? (
             <div className="text-center space-y-4">
               <div className="pixel-frame p-4">
                 <div className="text-xs text-[var(--muted-foreground)] italic">Tu voto ha sido registrado.</div>
-                <div className="text-2xl mt-2">{voteChoice === "guilty" ? "[!]" : "(+)"}</div>
+                <div className="text-2xl mt-2">{voteChoice === "guilty" ? "⚖" : "🕊"}</div>
                 <div className={cn("text-sm font-bold tracking-widest mt-1", voteChoice === "guilty" ? "text-[var(--destructive)]" : "text-[#4ec9b0]")} style={headFont}>{voteChoice === "guilty" ? "CULPABLE" : "INOCENTE"}</div>
               </div>
               <div className="text-xs text-[var(--muted-foreground)] animate-pulse tracking-widest">{lobbyPlayers.length <= 1 ? "Procesando tu voto..." : `Esperando al otro detective... (${votes.length}/${requiredVotes})`}</div>
@@ -1697,7 +1755,7 @@ export default function Home() {
                 <button onClick={() => { SFX.soundClick(); setVoteChoice("guilty"); }} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "guilty" ? "border-[var(--destructive)] bg-[var(--destructive)]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[var(--destructive)]")}> <div className="text-2xl">⚖</div><div className="text-sm font-bold tracking-widest mt-2 text-[var(--destructive)]" style={headFont}>CULPABLE</div><div className="text-[9px] text-[var(--muted-foreground)] mt-1">Va a prisión</div></button>
                 <button onClick={() => { SFX.soundClick(); setVoteChoice("innocent"); }} className={cn("p-4 text-center border-2 transition-all cursor-pointer", voteChoice === "innocent" ? "border-[#4ec9b0] bg-[#4ec9b0]/20 pixel-vote-glow" : "border-[var(--border)] bg-[var(--card)] hover:border-[#4ec9b0]")}><div className="text-2xl">🕊</div><div className="text-sm font-bold tracking-widest mt-2 text-[#4ec9b0]" style={headFont}>INOCENTE</div><div className="text-[9px] text-[var(--muted-foreground)] mt-1">Queda libre</div></button>
               </div>
-              <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">RAZÓN DE TU VOTO</label><textarea value={voteReason} onChange={(e) => setVoteReason(e.target.value)} className="pixel-input w-full min-h-[80px] resize-none text-xs" placeholder="¿Por qué?" /></div>
+              <div><label className="text-xs text-[var(--foreground)] tracking-wider block mb-1">RAZÓN DE TU VOTO</label><textarea value={voteReason} onChange={(e) => setVoteReason(e.target.value)} className="pixel-input w-full min-h-[80px] resize-none text-xs" placeholder="¿Por qué? Basa tu respuesta en la evidencia..." /></div>
               <button onClick={() => { SFX.soundVerdict(); handleSubmitVote(); }} disabled={!voteChoice} className={cn("w-full py-3 text-xs tracking-widest font-bold cursor-pointer", voteChoice ? (voteChoice === "guilty" ? "pixel-btn-danger" : "pixel-btn") : "pixel-btn-secondary opacity-30")} style={headFont}>REGISTRAR VOTO</button>
             </div>
           )}

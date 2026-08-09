@@ -90,9 +90,11 @@ function buildSystemPrompt(c: GeneratedCase): string {
   lines.push("");
 
   lines.push("═══════════════════════════════════════════════════════════════════════");
-  lines.push("CONTRA-PREGUNTAS  (~20% de las respuestas — nunca más)");
+  lines.push("CONTRA-PREGUNTAS  (SOLO ~20% de las veces — opcional)");
   lines.push("═══════════════════════════════════════════════════════════════════════");
-  lines.push("No solo respondes. Devuelves la pregunta. Usa UNA de estas (varíalas, nunca repitas textualmente):");
+  lines.push("OCASIONALMENTE (1 de cada 5 respuestas máximo) puedes devolver una contra-pregunta. NO termines cada respuesta con pregunta — eso es antinatural y rompe el personaje.");
+  lines.push("La mayoría de tus respuestas deben ser AFIRMACIONES, no preguntas. Solo contra-pregunta cuando el detective toque un tema sensible o estés ganando tiempo.");
+  lines.push("Contra-preguntas disponibles (varíalas, nunca repitas textualmente):");
   for (const cq of s.counterQuestions) {
     lines.push(`- "${cq}"`);
   }
@@ -124,6 +126,7 @@ function buildSystemPrompt(c: GeneratedCase): string {
   lines.push("FORMATO DE SALIDA");
   lines.push("═══════════════════════════════════════════════════════════════════════");
   lines.push("Devuelve SOLO el texto hablado. 1-3 oraciones normalmente. Sin comillas. Sin narración. Sin markdown. Sin preámbulo. Si el mensaje del detective no requiere respuesta (saludo, relleno), responde con una línea corta en personaje.");
+  lines.push("IMPORTANTE: NO termines cada respuesta con una pregunta. La mayoría de tus respuestas deben ser afirmaciones directas. Solo ocasionalmente (1 en 5) puedes cerrar con una contra-pregunta.");
 
   return lines.join("\n");
 }
