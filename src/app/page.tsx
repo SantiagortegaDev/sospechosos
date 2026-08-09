@@ -1972,7 +1972,32 @@ export default function Home() {
 
   /* ═══ RENDER: GENERATING_CASE ═══ */
   if (phase === "generating_case") {
-    return <CaseGeneratorScreen onCaseReady={handleCaseReady} onBack={() => setPhase("lobby")} />;
+    // Only the HOST generates the case. The non-host sees a waiting screen
+    // and will jump to case_intro when the host broadcasts game.start with
+    // the seed. Previously both detectives saw CaseGeneratorScreen, which
+    // caused the guest to get stuck (they can't generate, and the component
+    // doesn't know to wait).
+    if (session?.isHost) {
+      return <CaseGeneratorScreen onCaseReady={handleCaseReady} onBack={() => setPhase("lobby")} />;
+    }
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center p-4" style={bodyFont}>
+        {AchievementOverlay}{EvidencePopupOverlay}
+        <div className="pixel-frame max-w-md w-full p-8 space-y-6 text-center pixel-scale-in">
+          <div className="pixel-header"><span>ESPERANDO AL ANFITRIÓN</span></div>
+          <div className="text-4xl animate-pulse">🕵️</div>
+          <div className="space-y-2">
+            <div className="text-sm text-[var(--primary)] tracking-widest animate-pulse" style={headFont}>GENERANDO CASO...</div>
+            <div className="text-xs text-[var(--muted-foreground)] leading-relaxed">
+              El anfitrión está preparando el caso. La pantalla cambiará automáticamente cuando esté listo.
+            </div>
+          </div>
+          <div className="flex justify-center">
+            <TypingIndicator />
+          </div>
+        </div>
+      </main>
+    );
   }
 
   /* ═══ RENDER: CASE_INTRO ═══ */
