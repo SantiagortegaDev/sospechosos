@@ -17,12 +17,37 @@
  */
 
 let _ctx: AudioContext | null = null;
-let _muted = false;
 
-// Read initial mute state from localStorage (client-side only).
+/**
+ * Three independent audio channels — each can be muted separately.
+ *  - sfx:   UI clicks, blips, stress rises, achievement fanfares
+ *  - music: ambient background music (detective-music.mp3)
+ *  - voice: TTS speech synthesis for suspect replies
+ *
+ * `isMuted()` is kept as a backward-compat alias meaning "sfx muted".
+ */
+let _sfxMuted = false;
+let _musicMuted = false;
+let _voiceMuted = false;
+
+// Read initial mute states from localStorage (client-side only).
 if (typeof window !== "undefined") {
   try {
-    _muted = localStorage.getItem("sospechosos:muted") === "1";
+    // Backward-compat: if old "sospechosos:muted" was set, treat as sfx+music mute.
+    const legacy = localStorage.getItem("sospechosos:muted");
+    if (legacy !== null) {
+      _sfxMuted = legacy === "1";
+      _musicMuted = legacy === "1";
+      _voiceMuted = legacy === "1";
+      localStorage.removeItem("sospechosos:muted");
+      localStorage.setItem("sospechosos:sfx_muted", _sfxMuted ? "1" : "0");
+      localStorage.setItem("sospechosos:music_muted", _musicMuted ? "1" : "0");
+      localStorage.setItem("sospechosos:voice_muted", _voiceMuted ? "1" : "0");
+    } else {
+      _sfxMuted = localStorage.getItem("sospechosos:sfx_muted") === "1";
+      _musicMuted = localStorage.getItem("sospechosos:music_muted") === "1";
+      _voiceMuted = localStorage.getItem("sospechosos:voice_muted") === "1";
+    }
   } catch {
     // ignore
   }
@@ -30,7 +55,7 @@ if (typeof window !== "undefined") {
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
-  if (_muted) return null;
+  if (_sfxMuted) return null;
   if (!_ctx) {
     try {
       const Ctor =
@@ -47,30 +72,48 @@ function getCtx(): AudioContext | null {
   return _ctx;
 }
 
-export function isMuted(): boolean {
-  return _muted;
+/* ── Per-channel mute state ── */
+
+export function isSfxMuted(): boolean { return _sfxMuted; }
+export function isMusicMuted(): boolean { return _musicMuted; }
+export function isVoiceMuted(): boolean { return _voiceMuted; }
+
+export function setSfxMuted(m: boolean): void {
+  _sfxMuted = m;
+  if (typeof window !== "undefined") {
+    try { localStorage.setItem("sospechosos:sfx_muted", m ? "1" : "0"); } catch { /* ignore */ }
+  }
+  if (!m) { const ctx = getCtx(); if (ctx) void ctx.resume(); }
 }
 
-export function setMuted(muted: boolean): void {
-  _muted = muted;
+export function setMusicMuted(m: boolean): void {
+  _musicMuted = m;
   if (typeof window !== "undefined") {
-    try {
-      localStorage.setItem("sospechosos:muted", muted ? "1" : "0");
-    } catch {
-      // ignore
-    }
+    try { localStorage.setItem("sospechosos:music_muted", m ? "1" : "0"); } catch { /* ignore */ }
   }
-  // If unmuting, prime the context with a tiny silent blip so the browser
-  // unlocks audio for future calls.
-  if (!muted) {
-    const ctx = getCtx();
-    if (ctx) void ctx.resume();
+}
+
+export function setVoiceMuted(m: boolean): void {
+  _voiceMuted = m;
+  if (typeof window !== "undefined") {
+    try { localStorage.setItem("sospechosos:voice_muted", m ? "1" : "0"); } catch { /* ignore */ }
   }
+}
+
+export function toggleSfxMuted(): boolean { setSfxMuted(!_sfxMuted); return _sfxMuted; }
+export function toggleMusicMuted(): boolean { setMusicMuted(!_musicMuted); return _musicMuted; }
+export function toggleVoiceMuted(): boolean { setVoiceMuted(!_voiceMuted); return _voiceMuted; }
+
+/* ── Backward-compat aliases (treat as SFX) ── */
+
+export function isMuted(): boolean { return _sfxMuted; }
+
+export function setMuted(muted: boolean): void {
+  setSfxMuted(muted);
 }
 
 export function toggleMuted(): boolean {
-  setMuted(!_muted);
-  return _muted;
+  return toggleSfxMuted();
 }
 
 /* ─────────────────────────  Primitive helpers  ───────────────────────── */

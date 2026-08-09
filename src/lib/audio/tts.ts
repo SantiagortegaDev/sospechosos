@@ -12,7 +12,7 @@
  * would be needed.
  */
 
-import { isMuted } from "./sound-engine";
+import { isVoiceMuted } from "./sound-engine";
 import type { Gender } from "@/lib/ai/generated-case";
 
 let _maleVoice: SpeechSynthesisVoice | null = null;
@@ -61,7 +61,7 @@ export function isTTSAvailable(): boolean {
  */
 export function speak(text: string, gender: Gender = "man"): void {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  if (isMuted()) return;
+  if (isVoiceMuted()) return;
   if (!text?.trim()) return;
 
   // Cancel any previous speech to prevent double-play

@@ -205,7 +205,7 @@ export function adaptGeneratedCase(generated: GeneratedCase): CaseInfo {
 
   return {
     id: `gen_${generated.seed}`,
-    title: safeString(`${generated.title} — SEMILLA ${generated.seed}`),
+    title: safeString(generated.title),
     subtitle: `CASO GENERADO POR IA // ${safeString(generated.difficulty).toUpperCase() ?? "MEDIO"}`,
     briefing: safeString(generated.briefing),
     date: new Date().toLocaleDateString("es-ES", {

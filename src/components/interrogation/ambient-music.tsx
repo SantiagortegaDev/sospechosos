@@ -15,16 +15,16 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { isMuted } from "@/lib/audio/sound-engine";
+import { isMusicMuted } from "@/lib/audio/sound-engine";
 
 export function AmbientMusic() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [muted, setMuted] = useState(isMuted());
+  const [muted, setMuted] = useState(isMusicMuted());
 
-  // Sync mute state with the sound engine.
+  // Sync music mute state with the sound engine.
   useEffect(() => {
     const checkMuted = () => {
-      const m = isMuted();
+      const m = isMusicMuted();
       setMuted(m);
       if (audioRef.current) {
         audioRef.current.muted = m;
@@ -48,7 +48,7 @@ export function AmbientMusic() {
   // Start music on first user gesture (browser autoplay policy).
   useEffect(() => {
     const startMusic = () => {
-      if (isMuted()) return;
+      if (isMusicMuted()) return;
       if (audioRef.current && audioRef.current.dataset.started !== "true") {
         audioRef.current.dataset.started = "true";
         audioRef.current.volume = 0.35;

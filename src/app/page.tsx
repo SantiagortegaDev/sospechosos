@@ -52,14 +52,31 @@ const STORAGE_KEY = "sospechosos:session";
 const TUTORIAL_KEY = "sospechosos:tutorial_seen";
 const AI_TICK_MS = 40_000;
 const DELIBERATION_SECONDS = 120;
-const EVIDENCE_REVIEW_SECONDS = 60;
-const QUICK_QUESTIONS = [
-  { label: "Coartada", text: "¿Dónde estabas el día del crimen?" },
-  { label: "Relación", text: "¿Conocías a la víctima?" },
-  { label: "Motivo", text: "¿Tienes algún motivo?" },
-  { label: "Versión", text: "¿Puedes describir tu versión de los hechos?" },
-  { label: "Testigos", text: "¿Alguien puede confirmar tu historia?" },
-  { label: "Directa", text: "¿Tienes algo que esconder?" },
+const EVIDENCE_REVIEW_SECONDS = 90;
+const QUICK_QUESTIONS: Array<{ category: "neutral" | "amenazante" | "empatia" | "enganio"; label: string; text: string }> = [
+  // NEUTRAL — informativas, directas
+  { category: "neutral", label: "Coartada", text: "¿Dónde estabas el día del crimen?" },
+  { category: "neutral", label: "Relación", text: "¿Conocías a la víctima?" },
+  { category: "neutral", label: "Versión", text: "¿Puedes describir tu versión de los hechos?" },
+  { category: "neutral", label: "Testigos", text: "¿Alguien puede confirmar tu historia?" },
+  { category: "neutral", label: "Movimiento", text: "¿A qué hora llegaste al lugar?" },
+  { category: "neutral", label: "Identificación", text: "¿Puedes identificarte con tu nombre completo?" },
+  // AMENAZANTE — presión, consecuencias
+  { category: "amenazante", label: "Directa", text: "¿Tienes algo que esconder?" },
+  { category: "amenazante", label: "Castaño", text: "Sabemos que mientes. ¿Qué ganaste con esto?" },
+  { category: "amenazante", label: "Consecuencia", text: "¿Entiendes lo que te puede pasar si sigues mintiendo?" },
+  { category: "amenazante", label: "Acusación", text: "Las pruebas te señalan. ¿Vas a confesar o esperamos al juez?" },
+  { category: "amenazante", label: "Ultimátum", text: "Esta es tu última oportunidad. Habla ahora o cállate para siempre." },
+  // EMPATÍA — softer, building trust
+  { category: "empatia", label: "Confianza", text: "Puedes confiar en mí. Cuéntame qué pasó de verdad." },
+  { category: "empatia", label: "Comprensión", text: "Entiendo que sea difícil hablar. Tómate tu tiempo." },
+  { category: "empatia", label: "Apoyo", text: "Si cooperas, puedo ayudarte. ¿Qué te preocupa?" },
+  { category: "empatia", label: "Escucha", text: "Estoy aquí para escucharte, no para juzgarte." },
+  // ENGAÑO — bluffing, false info
+  { category: "enganio", label: "Falsa evidencia", text: "Encontramos tus huellas en la escena. ¿Cómo explicarlo?" },
+  { category: "enganio", label: "Testigo falso", text: "Ya tenemos un testigo que te vio. ¿Lo niegas?" },
+  { category: "enganio", label: "Confesión ajena", text: "Tu cómplice ya confesó. ¿Quieres agregar algo?" },
+  { category: "enganio", label: "Cámara", text: "Las cámaras te grabaron. ¿Vamos a verlas juntos?" },
 ];
 
 const TECHNIQUES: Array<{ key: InterrogationTechnique; label: string; emoji: string }> = [
@@ -171,6 +188,8 @@ export default function Home() {
   const [difficulty, setDifficulty] = useState<"facil" | "normal" | "dificil">("normal");
   const [crimeTheme, setCrimeTheme] = useState<"random" | "fraude" | "robo" | "asesinato" | "sabotaje">("random");
   const [aiVoice, setAiVoice] = useState<"on" | "off">("off");
+  const [musicEnabled, setMusicEnabled] = useState<"on" | "off">("off");
+  const [sfxEnabled, setSfxEnabled] = useState<"on" | "off">("on");
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [lobbyPlayers, setLobbyPlayers] = useState<
     Array<{ id: string; username: string; isHost: boolean }>
@@ -178,6 +197,18 @@ export default function Home() {
   const [error, setError] = useState("");
   const [muted, setMutedState] = useState(SFX.isMuted());
   const [loading, setLoading] = useState(false);
+
+  /* Sync audio settings (voz/musica/sfx) with the sound engine. */
+  useEffect(() => {
+    SFX.setVoiceMuted(aiVoice === "off");
+  }, [aiVoice]);
+  useEffect(() => {
+    SFX.setMusicMuted(musicEnabled === "off");
+  }, [musicEnabled]);
+  useEffect(() => {
+    SFX.setSfxMuted(sfxEnabled === "off");
+    setMutedState(sfxEnabled === "off");
+  }, [sfxEnabled]);
 
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialChecked, setTutorialChecked] = useState(false);
@@ -215,6 +246,21 @@ export default function Home() {
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [flaggedCount, setFlaggedCount] = useState(0);
   const [maxStress, setMaxStress] = useState(0);
+
+  /* Turn-based interrogation system (propose → approve/edit/reject). */
+  const [turnState, setTurnState] = useState<{
+    status: "idle" | "proposing" | "reviewing" | "approved";
+    proposerId: string | null;
+    proposerName: string | null;
+    proposedText: string;
+    timerEndsAt: number | null;
+  }>({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
+
+  /* Detective typing indicator (chat privado) + suspect responding indicator. */
+  const [otherTyping, setOtherTyping] = useState(false);
+  const [suspectResponding, setSuspectResponding] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [detectiveUnreadCount, setDetectiveUnreadCount] = useState(0);
 
   /* Evidence */
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([]);
@@ -296,12 +342,81 @@ export default function Home() {
     channelId: channels?.game ?? "__empty__",
     history: (phase === "playing" || phase === "evidence_review") ? 30 : "none",
     enabled:
-      (phase === "playing" || phase === "deliberation" || phase === "vote" || phase === "evidence_review") &&
+      (phase === "lobby" || phase === "playing" || phase === "deliberation" || phase === "vote" || phase === "evidence_review") &&
       !!channels,
     onMessage: (msg: any) => {
       try {
         const type = msg?.type ?? msg?.content?.type;
         const payload = msg?.content ?? msg;
+
+        // Lobby join — when another detective joins, broadcast their info.
+        // This is how the host learns about new players in real-time.
+        if (type === "lobby.join") {
+          const joinerId = payload.playerId as string;
+          const joinerName = payload.username as string;
+          const joinerIsHost = !!payload.isHost;
+          if (joinerId && joinerName) {
+            setLobbyPlayers((prev) => {
+              if (prev.some((p) => p.id === joinerId)) return prev;
+              return [...prev, { id: joinerId, username: joinerName, isHost: joinerIsHost }];
+            });
+            // If I'm the host, reply with my own lobby.presence so the
+            // joiner can see me too.
+            if (session?.isHost) {
+              try {
+                sendGame({
+                  type: "lobby.presence",
+                  content: { type: "lobby.presence", playerId, username: session.username, isHost: true },
+                });
+              } catch { /* ignore */ }
+            }
+          }
+        }
+        if (type === "lobby.presence") {
+          const pid = payload.playerId as string;
+          const pname = payload.username as string;
+          const phost = !!payload.isHost;
+          if (pid && pname) {
+            setLobbyPlayers((prev) => {
+              if (prev.some((p) => p.id === pid)) return prev;
+              return [...prev, { id: pid, username: pname, isHost: phost }];
+            });
+          }
+        }
+        // Propose question system — turn-based interrogation.
+        if (type === "question.propose") {
+          setTurnState((prev) => ({
+            ...prev,
+            proposerId: payload.proposerId as string,
+            proposerName: payload.proposerName as string,
+            proposedText: payload.text as string,
+            status: "reviewing",
+            timerEndsAt: Date.now() + 10_000,
+          }));
+        }
+        if (type === "question.approve") {
+          // The other detective approved — send the question.
+          setTurnState((prev) => ({ ...prev, status: "approved" as const }));
+        }
+        if (type === "question.reject") {
+          setTurnState((prev) => ({ ...prev, status: "idle" as const, proposedText: "", proposerId: null, proposerName: null }));
+        }
+        if (type === "question.edit") {
+          setTurnState((prev) => ({ ...prev, proposedText: payload.text as string }));
+        }
+        // Detectives typing indicator — show "respondiendo..." to the other.
+        if (type === "detective.typing") {
+          setOtherTyping(true);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => setOtherTyping(false), 3000);
+        }
+        // Suspect responding indicator — broadcast to both detectives.
+        if (type === "suspect.responding") {
+          setSuspectResponding(true);
+        }
+        if (type === "suspect.idle") {
+          setSuspectResponding(false);
+        }
 
         if (type === "game.chat" || type === "detective.question" || type === "suspect.answer" || type === "suspect.autonomous" || type === "system.event") {
           const gameMsg = payload as GameMessage;
@@ -408,6 +523,11 @@ export default function Home() {
             timestamp: payload.timestamp ?? Date.now(),
           };
           setDetectiveMessages((prev) => [...prev.slice(-50), dm]);
+          // Increment unread count if the user is not currently viewing the
+          // detectives tab — shows as a badge in the tab label.
+          if (rightTab !== "detectives") {
+            setDetectiveUnreadCount((c) => c + 1);
+          }
         }
       } catch { /* ignore */ }
     },
@@ -712,8 +832,18 @@ export default function Home() {
       setLobbyPlayers((prev) => [...prev, { id: playerId, username: username.trim(), isHost: false }]);
       setPhase("lobby");
       SFX.soundConnect();
+      // Broadcast lobby.join so the host sees us. We retry briefly because
+      // the channel subscription may not be ready the instant setPhase fires.
+      setTimeout(() => {
+        try {
+          sendGame({
+            type: "lobby.join",
+            content: { type: "lobby.join", playerId, username: username.trim(), isHost: false },
+          });
+        } catch { /* ignore */ }
+      }, 500);
     } catch { setError("Error al unirse a la sala"); } finally { setLoading(false); }
-  }, [username, roomCode, playerId]);
+  }, [username, roomCode, playerId, sendGame]);
 
   const handleJoinByLink = useCallback(async () => { await handleJoinRoom(); }, [handleJoinRoom]);
 
@@ -754,53 +884,55 @@ export default function Home() {
     setChatMessages([]); setDetectiveMessages([]); setConversationHistory([]);
     setQuestionsAsked(0); setFlaggedCount(0); setMaxStress(currentCase.suspect.baseline.stress);
     setSelectedEvidence(null); setTechnique("neutral");
+    // Reset vote state so the previous case's vote reason doesn't leak in.
+    setVotes([]); setHasVoted(false); setVoteChoice(""); setVoteReason(""); setAllVotesIn(false);
+    setVerdict(null); setEnding(null); setRevelation(null);
+    setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
     setPhase("playing");
     SFX.soundWhoosh();
   }, [currentCase, roundTime]);
 
-  const handleInterrogate = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = chatDraft.trim();
-    if (!text || pending || !currentCase || !session) return;
-    if (interrogatingRef.current) return; // Prevent double-fire from React re-renders
+  /* ═══ TURN-BASED INTERROGATION ═══
+   * With 2 detectives, one PROPOSES a question, the other can APPROVE / EDIT /
+   * REJECT / propose a different one. When approved (or after a 10s consenso
+   * timer with no objection), the proposed question is sent to the suspect.
+   * With a single detective, the question is sent directly (no proposal needed).
+   */
+  const isMultiplayer = lobbyPlayers.length >= 2;
+
+  const runInterrogation = useCallback(async (questionText: string) => {
+    // Core interrogation logic — used by both the direct-send (1-detective)
+    // and the proposal-approved (2-detective) flows.
+    if (!questionText.trim() || !currentCase || !session) return;
+    if (interrogatingRef.current) return;
     interrogatingRef.current = true;
-    setChatDraft(""); setPending(true); setQuestionsAsked((prev) => prev + 1);
-    // SFX: send question blip (ascending square wave)
+    setChatDraft("");
+    setPending(true);
+    setQuestionsAsked((prev) => prev + 1);
     SFX.soundSendQuestion();
-    // Stop any in-progress TTS from a previous answer.
     stopSpeaking();
 
+    const text = questionText.trim();
     const qMsg: GameMessage = { type: "detective.question", senderType: "detective", senderId: playerId, senderName: session.username, text, timestamp: Date.now() };
     setChatMessages((prev) => [...prev.slice(-80), qMsg]);
-
     const newTurn: ConversationTurn = { role: "detective", text, detectiveName: session.username, timestamp: Date.now() };
     try { await sendGame({ type: "detective.question", content: qMsg }); } catch { /* ok */ }
 
-    // Check for evidence unlocks — two strategies:
-    // 1. unlockTopic regex (if the case generator provided one)
-    // 2. FALLBACK: keyword match on the evidence label + description.
-    //    This guarantees evidence is always unlockable even if the LLM
-    //    generated a bad unlockTopic regex that never matches.
+    // Evidence unlocks (regex + keyword fallback)
     const qLower = text.toLowerCase();
     let unlockedSomething = false;
     setEvidenceItems((prev) => prev.map(ev => {
       if (!ev.isLocked) return ev;
-      // Strategy 1: explicit unlockTopic regex.
       if (ev.unlockTopic) {
         try { if (new RegExp(ev.unlockTopic, "i").test(qLower)) { unlockedSomething = true; return { ...ev, isLocked: false }; } } catch { /* invalid regex */ }
       }
-      // Strategy 2: fallback — extract keywords from label + description
-      // and check if the question contains any of them.
       const keywordSource = `${ev.label} ${ev.description}`.toLowerCase();
       const keywords = keywordSource
         .split(/[^a-záéíóúñ]+/)
-        .filter(w => w.length >= 4 && !["para","como","cuando","donde","porque","tiene","tiene","esto","esos","este","essa","essa","con","sin","sobre","tras","desde","hasta","entre","para"].includes(w));
-      const uniqueKeywords = [...new Set(keywords)].slice(0, 8); // max 8 keywords
+        .filter(w => w.length >= 4 && !["para","como","cuando","donde","porque","tiene","esto","esos","este","con","sin","sobre","tras","desde","hasta","entre"].includes(w));
+      const uniqueKeywords = [...new Set(keywords)].slice(0, 8);
       for (const kw of uniqueKeywords) {
-        if (qLower.includes(kw)) {
-          unlockedSomething = true;
-          return { ...ev, isLocked: false };
-        }
+        if (qLower.includes(kw)) { unlockedSomething = true; return { ...ev, isLocked: false }; }
       }
       return ev;
     }));
@@ -831,17 +963,13 @@ export default function Home() {
       if (technique !== "neutral") { body.technique = technique; }
 
       const res = await fetch("/api/interrogate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      try { await sendGame({ type: "suspect.responding", content: { type: "suspect.responding" } }); } catch { /* ok */ }
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
+        try { await sendGame({ type: "suspect.idle", content: { type: "suspect.idle" } }); } catch { /* ok */ }
         if (res.status === 429 || errBody.error === "rate_limited") {
-          // Rate limited — show a clear message in the chat so the user
-          // knows it's a quota issue, not a game bug. Still update stress
-          // (the question was asked, even if the suspect won't answer).
           const rateLimitMsg: GameMessage = {
-            type: "suspect.answer",
-            senderType: "suspect",
-            senderId: "system",
-            senderName: "SISTEMA",
+            type: "suspect.answer", senderType: "suspect", senderId: "system", senderName: "SISTEMA",
             text: "[Límite de la API alcanzado. El sospechoso guarda silencio. Espera unos minutos.]",
             timestamp: Date.now(),
           };
@@ -853,44 +981,33 @@ export default function Home() {
         throw new Error(errBody.error || errBody.detail || `HTTP ${res.status}`);
       }
       const data = await res.json();
+      try { await sendGame({ type: "suspect.idle", content: { type: "suspect.idle" } }); } catch { /* ok */ }
 
       const answerText = data.answer?.text || "No tengo nada que decir.";
       const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: answerText, timestamp: Date.now(), flagged: data.answer?.flagged };
       setChatMessages((prev) => [...prev.slice(-80), aMsg]);
       try { await sendGame({ type: "suspect.answer", content: aMsg }); } catch { /* ok */ }
-
       setConversationHistory((prev) => [...prev.slice(-40), newTurn, { role: "suspect", text: answerText, timestamp: Date.now() }]);
 
-      // SFX: stress rise — compare previous stress to new stress.
       const prevStressLevel = stress?.stress ?? 0;
       const newStressLevel = data.stress?.stress ?? prevStressLevel;
       if (newStressLevel > prevStressLevel + 5) {
-        // Delay slightly so it lands as the answer appears.
         setTimeout(() => SFX.soundStressRise(newStressLevel), 200);
       }
-
       if (data.stress) {
         setStress(data.stress);
         if (data.stress.stress > maxStress) setMaxStress(data.stress.stress);
       }
-
-      // SFX: lie detected (glitch) + TTS for the suspect's answer.
       if (data.answer?.flagged) {
         setFlaggedCount((prev) => prev + 1);
         unlockAchievement("gotcha");
         setTimeout(() => SFX.soundLieDetected(), 150);
       }
-      // TTS: speak the suspect's answer aloud IN SYNC with the typewriter.
-      // No delay — the voice starts the moment the message renders and the
-      // typewriter begins revealing characters. Voice gender matches the
-      // suspect's gender so men sound male and women sound female.
       const suspectGender = recallGender(currentCase?.id?.replace("gen_", "") ?? "default");
       speak(answerText, suspectGender);
-
       if (questionsAsked === 0) unlockAchievement("first_blood");
       if (data.stress?.stress >= 90) unlockAchievement("pressure_cooker");
       if (questionsAsked + 1 >= 20) unlockAchievement("cross_examine");
-
       setSelectedEvidence(null);
       setTechnique("neutral");
     } catch (err) {
@@ -899,6 +1016,91 @@ export default function Home() {
       SFX.soundError();
     } finally { setPending(false); interrogatingRef.current = false; }
   }, [chatDraft, pending, currentCase, session, playerId, conversationHistory, stress, sendGame, maxStress, questionsAsked, unlockAchievement, selectedEvidence, technique]);
+
+  // Form-submit handler — uses chatDraft (the input field value).
+  const handleInterrogate = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = chatDraft.trim();
+    if (!text) return;
+    // In multiplayer mode, the form's submit button PROPOSES instead of
+    // sending directly. The actual send happens after approval.
+    if (isMultiplayer) {
+      handleProposeQuestion();
+      return;
+    }
+    runInterrogation(text);
+  }, [chatDraft, isMultiplayer, handleProposeQuestion, runInterrogation]);
+
+  const handleProposeQuestion = useCallback(() => {
+    const text = chatDraft.trim();
+    if (!text || !session) return;
+    if (!isMultiplayer) {
+      runInterrogation(text);
+      return;
+    }
+    setTurnState({
+      status: "reviewing",
+      proposerId: playerId,
+      proposerName: session.username,
+      proposedText: text,
+      timerEndsAt: Date.now() + 10_000,
+    });
+    try {
+      sendGame({
+        type: "question.propose",
+        content: {
+          type: "question.propose",
+          proposerId: playerId,
+          proposerName: session.username,
+          text,
+        },
+      });
+    } catch { /* ignore */ }
+  }, [chatDraft, session, playerId, isMultiplayer, sendGame, runInterrogation]);
+
+  const handleApproveProposal = useCallback(() => {
+    if (turnState.status !== "reviewing" || !turnState.proposedText) return;
+    try { sendGame({ type: "question.approve", content: { type: "question.approve" } }); } catch { /* ignore */ }
+    const text = turnState.proposedText;
+    setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
+    runInterrogation(text);
+  }, [turnState, sendGame, runInterrogation]);
+
+  const handleRejectProposal = useCallback(() => {
+    try { sendGame({ type: "question.reject", content: { type: "question.reject" } }); } catch { /* ignore */ }
+    setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
+  }, [sendGame]);
+
+  const handleEditProposal = useCallback((newText: string) => {
+    if (turnState.status !== "reviewing") return;
+    setTurnState((prev) => ({ ...prev, proposedText: newText, timerEndsAt: Date.now() + 10_000 }));
+    try {
+      sendGame({ type: "question.edit", content: { type: "question.edit", text: newText } });
+    } catch { /* ignore */ }
+  }, [turnState.status, sendGame]);
+
+  // Consenso timer — auto-approve after 10s if nobody objects.
+  useEffect(() => {
+    if (turnState.status !== "reviewing" || !turnState.timerEndsAt) return;
+    const remaining = turnState.timerEndsAt - Date.now();
+    if (remaining <= 0) {
+      handleApproveProposal();
+      return;
+    }
+    const t = setTimeout(() => {
+      setTurnState((cur) => {
+        if (cur.status === "reviewing" && cur.proposedText) {
+          const text = cur.proposedText;
+          runInterrogation(text);
+          return { status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null };
+        }
+        return cur;
+      });
+    }, remaining);
+    return () => clearTimeout(t);
+  }, [turnState.status, turnState.timerEndsAt, handleApproveProposal, runInterrogation]);
+
+  /* (Legacy handleInterrogate body removed — replaced by runInterrogation above.) */
 
   const handleSendDetective = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1290,13 +1492,35 @@ export default function Home() {
           />
 
           <OptionSelector
-            label="VOZ DEL SOSPECHOSO (BETA)"
+            label="VOZ DEL SOSPECHOSO"
             value={aiVoice}
             onChange={setAiVoice}
             sectionKey="aiVoice"
             options={[
               { value: "on", label: "ACTIVADA", emoji: "[GREEN]" },
-              { value: "off", label: "SILENCIADA", emoji: "[GRAY]" },
+              { value: "off", label: "DESACTIVADA", emoji: "[GRAY]" },
+            ]}
+          />
+
+          <OptionSelector
+            label="MÚSICA AMBIENTAL"
+            value={musicEnabled}
+            onChange={setMusicEnabled}
+            sectionKey="musicEnabled"
+            options={[
+              { value: "on", label: "ACTIVADA", emoji: "[GREEN]" },
+              { value: "off", label: "DESACTIVADA", emoji: "[GRAY]" },
+            ]}
+          />
+
+          <OptionSelector
+            label="EFECTOS DE SONIDO"
+            value={sfxEnabled}
+            onChange={setSfxEnabled}
+            sectionKey="sfxEnabled"
+            options={[
+              { value: "on", label: "ACTIVADOS", emoji: "[GREEN]" },
+              { value: "off", label: "DESACTIVADOS", emoji: "[GRAY]" },
             ]}
           />
 
@@ -1374,7 +1598,15 @@ export default function Home() {
             </div>
             <div className="flex justify-between text-xs">
               <span className="text-[var(--muted-foreground)]">VOZ IA:</span>
-              <span className="text-[var(--primary)] font-bold">{aiVoice === "on" ? "ACTIVADA" : "SILENCIADA"}</span>
+              <span className="text-[var(--primary)] font-bold">{aiVoice === "on" ? "ACTIVADA" : "DESACTIVADA"}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-[var(--muted-foreground)]">MÚSICA:</span>
+              <span className="text-[var(--primary)] font-bold">{musicEnabled === "on" ? "ACTIVADA" : "DESACTIVADA"}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-[var(--muted-foreground)]">EFECTOS:</span>
+              <span className="text-[var(--primary)] font-bold">{sfxEnabled === "on" ? "ACTIVADOS" : "DESACTIVADOS"}</span>
             </div>
           </div>
           {session?.isHost && <button onClick={() => { SFX.soundClick(); handleStartGame(); }} className="pixel-btn w-full py-3" style={headFont}>COMENZAR</button>}
@@ -1586,9 +1818,7 @@ export default function Home() {
       const tabList = [
         { key: "expediente" as const, label: "EXPEDIENTE" },
         { key: "evidencia" as const, label: `EVIDENCIA (${unlockedCount}/${totalEvCount})` },
-        { key: "notas" as const, label: "NOTAS" },
-        { key: "timeline" as const, label: "TIMELINE" },
-        { key: "detectives" as const, label: "DETECTIVES" },
+        { key: "detectives" as const, label: detectiveUnreadCount > 0 && rightTab !== "detectives" ? `DETECTIVES (${detectiveUnreadCount})` : "DETECTIVES" },
         { key: "herramientas" as const, label: "HERRAMIENTAS" },
       ];
       return (
@@ -1598,7 +1828,7 @@ export default function Home() {
             {tabList.map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => { setRightTab(tab.key); SFX.soundTab(); }}
+                onClick={() => { setRightTab(tab.key); SFX.soundTab(); if (tab.key === "detectives") setDetectiveUnreadCount(0); }}
                 className={cn(
                   "px-2.5 py-2 text-[12px] tracking-wider transition-all cursor-pointer",
                   rightTab === tab.key
@@ -1633,12 +1863,21 @@ export default function Home() {
                 <div className="pixel-frame p-3">
                   <div className="text-xs tracking-[0.18em] text-[var(--muted-foreground)] uppercase mb-2">Hechos conocidos</div>
                   <div className="space-y-2">
+                    {suspect.knownFacts.length === 0 && <div className="text-xs text-[var(--muted-foreground)] italic">Sin hechos conocidos.</div>}
                     {suspect.knownFacts.map((f, i) => (
                       <div key={i} className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed">
                         <span className="text-[var(--primary)] shrink-0">▸</span>
                         <span>{safeRender(f)}</span>
                       </div>
                     ))}
+                    {/* Add the case situation as an extra fact so the panel
+                        doesn't look empty when the LLM produced few facts. */}
+                    {currentCase.stakes && (
+                      <div className="text-xs text-[var(--foreground)] flex gap-2 leading-relaxed pt-2 border-t border-[var(--border)]">
+                        <span className="text-[var(--destructive)] shrink-0">⚠</span>
+                        <span><span className="text-[var(--destructive)] font-bold">EN JUEGO:</span> {safeRender(currentCase.stakes)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1646,6 +1885,9 @@ export default function Home() {
             {rightTab === "evidencia" && (
               <div className="space-y-2">
                 <div className="text-xs text-[var(--primary)] font-bold">EVIDENCIA</div>
+                <div className="text-[11px] text-[var(--muted-foreground)] italic mb-2 leading-relaxed">
+                  Las pruebas se desbloquean mientras indagues más en el caso. Haz preguntas sobre coartada, testigos, ubicación, móviles...
+                </div>
                 {evidenceItems.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">Sin evidencia</div> : (
                   <div className="space-y-2">
                     {evidenceItems.map((ev) => (
@@ -1655,6 +1897,7 @@ export default function Home() {
                           <span className="text-[13px] font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
                         </div>
                         {!ev.isLocked && <div className="text-[13px] text-[var(--muted-foreground)] mt-1">{safeRender(ev.description)}</div>}
+                        {ev.isLocked && <div className="text-[10px] text-[var(--muted-foreground)] mt-1 italic">Bloqueada — investiga más para desbloquear</div>}
                       </div>
                     ))}
                   </div>
@@ -1667,28 +1910,38 @@ export default function Home() {
                 )}
               </div>
             )}
-            {rightTab === "notas" && (
-              <div className="space-y-2">
-                <div className="text-xs text-[var(--primary)] font-bold">NOTAS COMPARTIDAS</div>
-                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="pixel-input w-full min-h-[200px] resize-none text-xs" placeholder="Escribe tus notas aquí..." />
-              </div>
-            )}
-            {rightTab === "timeline" && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between"><div className="text-xs text-[var(--primary)] font-bold">LÍNEA TEMPORAL</div><button onClick={() => { SFX.soundClick(); addTimelineEntry(); }} className="pixel-btn-secondary text-xs py-1 px-2">+ AGREGAR</button></div>
-                {timelineEntries.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">Sin eventos</div> : (
-                  <div className="space-y-2">{timelineEntries.map((entry) => (<div key={entry.id} className="pixel-frame p-2"><div className="text-[13px] text-[var(--primary)] font-bold tracking-wider">{entry.label}</div><div className="text-xs text-[var(--foreground)] mt-0.5">{entry.description}</div><div className="text-xs text-[var(--muted-foreground)] mt-1">— {entry.addedByName}</div></div>))}</div>
-                )}
-              </div>
-            )}
             {rightTab === "detectives" && (
-              <div className="flex flex-col h-64">
-                <div className="text-xs text-[var(--primary)] font-bold mb-2">CHAT PRIVADO — DETECTIVES</div>
-                <div className="flex-1 pixel-scroll overflow-y-auto space-y-2 mb-2">
-                  {detectiveMessages.map((dm, i) => (<div key={i} className="text-xs"><span className="text-[var(--primary)] font-bold">[{safeRender(dm.detectiveName)}]:</span> <span className="text-[var(--foreground)]">{safeRender(dm.text)}</span></div>))}
+              <div className="flex flex-col" style={{ height: "calc(100vh - 220px)", minHeight: "260px" }}>
+                <div className="text-xs text-[var(--primary)] font-bold mb-2 flex items-center gap-2">
+                  <span>CHAT PRIVADO — DETECTIVES</span>
+                  {otherTyping && <span className="text-[10px] text-[var(--muted-foreground)] italic">(escribiendo...)</span>}
+                </div>
+                <div className="flex-1 pixel-scroll overflow-y-auto space-y-2 mb-2 border border-[var(--border)] p-2 min-h-[120px]">
+                  {detectiveMessages.map((dm, i) => (
+                    <div key={i} className={cn("text-xs", dm.detectiveId === playerId ? "text-right" : "text-left")}>
+                      {dm.detectiveId !== playerId && <span className="text-[var(--primary)] font-bold">[{safeRender(dm.detectiveName)}]: </span>}
+                      <span className="text-[var(--foreground)]">{safeRender(dm.text)}</span>
+                    </div>
+                  ))}
                   {detectiveMessages.length === 0 && <div className="text-xs text-[var(--muted-foreground)] italic text-center py-4">Sin mensajes privados</div>}
                 </div>
-                <form onSubmit={handleSendDetective} className="flex gap-1"><input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." /><button type="submit" className="pixel-btn text-xs px-2">ENVIAR</button></form>
+                <form onSubmit={handleSendDetective} className="flex gap-1 shrink-0">
+                  <input
+                    value={detectiveDraft}
+                    onChange={(e) => {
+                      setDetectiveDraft(e.target.value);
+                      // Broadcast typing indicator (throttled by 500ms).
+                      try {
+                        if (!typingTimeoutRef.current) {
+                          sendGame({ type: "detective.typing", content: { type: "detective.typing", playerId } });
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                    className="pixel-input flex-1 text-xs"
+                    placeholder="Mensaje privado al otro detective..."
+                  />
+                  <button type="submit" className="pixel-btn text-xs px-3 py-2">ENVIAR</button>
+                </form>
               </div>
             )}
             {rightTab === "herramientas" && (
@@ -1703,7 +1956,37 @@ export default function Home() {
                   ))}
                 </div>
                 <div className="text-xs text-[var(--primary)] font-bold mb-2">PREGUNTAS RÁPIDAS</div>
-                {QUICK_QUESTIONS.map((q) => (<button key={q.label} onClick={() => { SFX.soundClick(); insertQuickQuestion(q.text); }} className="pixel-frame w-full p-2 text-left hover:bg-[var(--primary)]/10 transition-all cursor-pointer"><div className="text-[12px] text-[var(--primary)] tracking-wider font-bold">{q.label.toUpperCase()}</div><div className="text-xs text-[var(--foreground)] mt-0.5">"{q.text}"</div></button>))}
+                {(["neutral", "amenazante", "empatia", "enganio"] as const).map((cat) => (
+                  <div key={cat} className="mb-3">
+                    <div className={cn(
+                      "text-[11px] tracking-wider font-bold mb-1.5 px-1 py-0.5",
+                      cat === "neutral" && "text-[var(--muted-foreground)]",
+                      cat === "amenazante" && "text-[var(--destructive)]",
+                      cat === "empatia" && "text-[#4ec9b0]",
+                      cat === "enganio" && "text-[#fbbf24]"
+                    )}>
+                      {cat === "neutral" ? "□ NEUTRAL" : cat === "amenazante" ? "⚠ AMENAZANTE" : cat === "empatia" ? "♥ EMPATÍA" : "◆ ENGAÑO"}
+                    </div>
+                    {QUICK_QUESTIONS.filter(q => q.category === cat).map((q) => (
+                      <button
+                        key={q.label}
+                        onClick={() => {
+                          SFX.soundClick();
+                          insertQuickQuestion(q.text);
+                          // Also set the matching technique automatically.
+                          if (cat === "amenazante") setTechnique("amenaza");
+                          else if (cat === "empatia") setTechnique("empatia");
+                          else if (cat === "enganio") setTechnique("enganio");
+                          else setTechnique("neutral");
+                        }}
+                        className="pixel-frame w-full p-2 text-left hover:bg-[var(--primary)]/10 transition-all cursor-pointer mb-1"
+                      >
+                        <div className="text-[12px] text-[var(--primary)] tracking-wider font-bold">{q.label.toUpperCase()}</div>
+                        <div className="text-xs text-[var(--foreground)] mt-0.5">"{q.text}"</div>
+                      </button>
+                    ))}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1722,9 +2005,17 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-4">
             <span className={cn("text-sm font-bold", timeRemaining <= 60 ? "text-[var(--destructive)] pixel-timer-warning" : "text-[var(--primary)]")} style={headFont}>{formatTime(timeRemaining)}</span>
-            <button onClick={() => { const m = SFX.toggleMuted(); setMutedState(m); if (!m) SFX.soundClick(); }} className="pixel-btn-secondary text-xs py-1 px-3" title={muted ? "Activar sonido" : "Silenciar"}>
-              {muted ? "[MUTE]" : "[SND]"}
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => { SFX.soundClick(); const m = SFX.toggleSfxMuted(); setMutedState(m); }} className="pixel-btn-secondary text-[10px] py-1 px-2" title="Efectos de sonido">
+                {sfxEnabled === "on" ? "SFX" : "SFX—"}
+              </button>
+              <button onClick={() => { const m = SFX.toggleMusicMuted(); setMusicEnabled(m ? "off" : "on"); }} className="pixel-btn-secondary text-[10px] py-1 px-2" title="Música ambiental">
+                {musicEnabled === "on" ? "MUS" : "MUS—"}
+              </button>
+              <button onClick={() => { const m = SFX.toggleVoiceMuted(); setAiVoice(m ? "off" : "on"); }} className="pixel-btn-secondary text-[10px] py-1 px-2" title="Voz del sospechoso">
+                {aiVoice === "on" ? "VOZ" : "VOZ—"}
+              </button>
+            </div>
             <button onClick={() => { SFX.soundClick(); enterDeliberation(); }} className="pixel-btn-danger text-xs py-1 px-3">DELIBERAR</button>
           </div>
         </header>
@@ -1826,13 +2117,35 @@ export default function Home() {
                   </div>
                 );
               })}
-              {pending && <div className="flex justify-end"><div className="pixel-frame p-2.5 text-xs text-[var(--muted-foreground)]"><TypingIndicator label="El sospechoso está respondiendo" /></div></div>}
+              {(pending || suspectResponding) && <div className="flex justify-end"><div className="pixel-frame p-2.5 text-xs text-[var(--muted-foreground)]"><TypingIndicator label="El sospechoso está respondiendo" /></div></div>}
               <div ref={chatEndRef} />
             </div>
+            {/* PROPOSAL REVIEW UI — shown when the other detective proposed a question */}
+            {turnState.status === "reviewing" && (
+              <div className="border-t-2 border-[var(--primary)] bg-[var(--primary)]/5 p-3 space-y-2 shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-[var(--primary)] font-bold tracking-wider">
+                    PROPUESTA DE {safeRender(turnState.proposerName).toUpperCase()}
+                  </div>
+                  <div className="text-[10px] text-[var(--muted-foreground)]">
+                    Auto-envío en {turnState.timerEndsAt ? Math.max(0, Math.ceil((turnState.timerEndsAt - Date.now()) / 1000)) : 0}s
+                  </div>
+                </div>
+                <div className="pixel-frame p-2 text-xs text-[var(--foreground)] italic">"{safeRender(turnState.proposedText)}"</div>
+                {turnState.proposerId === playerId ? (
+                  <div className="text-[11px] text-[var(--muted-foreground)] italic text-center">Esperando aprobación del otro detective (o auto-envío en 10s)...</div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={() => { SFX.soundClick(); handleApproveProposal(); }} className="pixel-btn flex-1 text-xs py-2">✓ APROBAR Y ENVIAR</button>
+                    <button onClick={() => { SFX.soundClick(); handleRejectProposal(); }} className="pixel-btn-danger flex-1 text-xs py-2">✕ RECHAZAR</button>
+                  </div>
+                )}
+              </div>
+            )}
             <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-2 flex gap-2 shrink-0">
               {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-xs text-[var(--destructive)]">📎 {safeRender(selectedEvidence.label)}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
-              <input ref={chatInputRef} value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta al sospechoso...` : "Pregunta al sospechoso..."} disabled={pending} />
-              <button type="submit" disabled={pending || !chatDraft.trim()} className="pixel-btn text-xs px-4">{pending ? "..." : "ENVIAR"}</button>
+              <input ref={chatInputRef} value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta al sospechoso...` : isMultiplayer ? "Propón una pregunta..." : "Pregunta al sospechoso..."} disabled={pending || turnState.status === "reviewing"} />
+              <button type="submit" disabled={pending || !chatDraft.trim() || turnState.status === "reviewing"} className="pixel-btn text-xs px-4">{pending ? "..." : isMultiplayer ? "PROPONER" : "ENVIAR"}</button>
             </form>
           </section>
 
@@ -1871,6 +2184,7 @@ export default function Home() {
 
   /* ═══ RENDER: DELIBERATION ═══ */
   if (phase === "deliberation") {
+    const unlockedEvidence = evidenceItems.filter((e) => !e.isLocked);
     return (
       <div className="min-h-screen flex flex-col" style={bodyFont}>
         {AchievementOverlay}
@@ -1879,24 +2193,62 @@ export default function Home() {
           <div className="flex items-center gap-3"><PhaseIndicator current="deliberation" /><div className="text-xl font-bold text-[var(--primary)]" style={headFont}>⏱ {formatTime(delibTimeRemaining)}</div></div>
         </header>
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-          <aside className="hidden md:flex flex-col w-72 border-r-2 border-[var(--border)] bg-[var(--card)] p-4 space-y-4 shrink-0">
-            <div className="pixel-header"><span>RESUMEN</span></div>
-            <div className="space-y-3 pixel-scroll overflow-y-auto flex-1">
-              <div><div className="text-xs text-[var(--foreground)] tracking-wider">PREGUNTAS</div><div className="text-lg font-bold text-[var(--primary)]">{questionsAsked}</div></div>
-              <div><div className="text-xs text-[var(--foreground)] tracking-wider">ESTRÉS MÁXIMO</div><div className="text-lg font-bold text-[var(--destructive)]">{maxStress}%</div></div>
-              <div><div className="text-xs text-[var(--foreground)] tracking-wider">FLAGGED</div><div className="text-lg font-bold text-[var(--destructive)]">{flaggedCount}</div></div>
-              <div><div className="text-xs text-[var(--foreground)] tracking-wider">EVIDENCIA</div><div className="text-lg font-bold text-[var(--primary)]">{evidenceItems.filter(e => !e.isLocked).length}/{evidenceItems.length}</div></div>
-              <div className="border-t border-[var(--border)] pt-2"><div className="text-xs text-[var(--foreground)] mb-1">SOSPECHOSO</div><div className="text-xs text-[var(--foreground)]">{safeRender(currentCase?.suspect.avatar)} {safeRender(currentCase?.suspect.name)} — {safeRender(currentCase?.suspect.role)}</div></div>
+          {/* LEFT — Evidence unlocked during interrogation */}
+          <aside className="hidden md:flex flex-col w-80 border-r-2 border-[var(--border)] bg-[var(--card)] p-4 space-y-3 shrink-0">
+            <div className="pixel-header"><span>EVIDENCIA DESCUBIERTA</span></div>
+            <div className="space-y-2 pixel-scroll overflow-y-auto flex-1">
+              {unlockedEvidence.length === 0 ? (
+                <div className="text-xs text-[var(--muted-foreground)] italic text-center py-6">No desbloquearon evidencia.</div>
+              ) : (
+                unlockedEvidence.map((ev) => (
+                  <div key={ev.id} className={cn("pixel-frame p-2", ev.isRedHerring && "border-l-2 border-[var(--destructive)]")}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm">{ev.isRedHerring ? "🔴" : "[DOC]"}</span>
+                      <span className="text-[13px] font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
+                    </div>
+                    <p className="text-[12px] text-[var(--muted-foreground)] leading-relaxed">{safeRender(ev.description)}</p>
+                  </div>
+                ))
+              )}
+              <div className="border-t border-[var(--border)] pt-3 mt-2">
+                <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider mb-2">SOSPECHOSO</div>
+                <div className="text-xs text-[var(--foreground)] flex items-center gap-2">
+                  <span className="text-lg">{safeRender(currentCase?.suspect.avatar)}</span>
+                  <div>
+                    <div className="font-bold">{safeRender(currentCase?.suspect.name)}</div>
+                    <div className="text-[12px] text-[var(--muted-foreground)]">{safeRender(currentCase?.suspect.role)}</div>
+                  </div>
+                </div>
+              </div>
             </div>
             <button onClick={() => { SFX.soundClick(); skipToVote(); }} className="pixel-btn w-full py-3 mt-auto" style={headFont}>VOTAR AHORA</button>
           </aside>
+          {/* RIGHT — Detective private chat (restored for deliberation) */}
           <section className="flex-1 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--card)]">
+              <div className="text-xs text-[var(--primary)] font-bold tracking-wider">CHAT PRIVADO — DETECTIVES</div>
+              <div className="text-[10px] text-[var(--muted-foreground)] italic">Discutan sus conclusiones antes de votar</div>
+            </div>
             <div className="flex-1 overflow-y-auto pixel-scroll p-3 space-y-2">
-              {detectiveMessages.length === 0 && <div className="text-center text-xs text-[var(--muted-foreground)] italic py-8">Discute tus conclusiones...</div>}
-              {detectiveMessages.map((dm, i) => (<div key={i} className="flex flex-col items-start"><div className="text-[12px] text-[var(--primary)] tracking-wider">[{safeRender(dm.detectiveName)}]</div><div className="pixel-frame p-2.5 text-xs text-[var(--foreground)] max-w-[80%]">{safeRender(dm.text)}</div></div>))}
+              {detectiveMessages.length === 0 && <div className="text-center text-xs text-[var(--muted-foreground)] italic py-8">Sin mensajes todavía. Empieza la discusión...</div>}
+              {detectiveMessages.map((dm, i) => (
+                <div key={i} className={cn("flex flex-col", dm.detectiveId === playerId ? "items-end" : "items-start")}>
+                  <div className="text-[12px] text-[var(--primary)] tracking-wider mb-1">[{safeRender(dm.detectiveName)}]</div>
+                  <div className={cn("pixel-frame p-2.5 text-xs text-[var(--foreground)] max-w-[80%]", dm.detectiveId === playerId && "pixel-frame-active")}>{safeRender(dm.text)}</div>
+                </div>
+              ))}
               <div ref={chatEndRef} />
             </div>
-            <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0"><input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." /><button type="submit" className="pixel-btn text-xs px-4">ENVIAR</button></form>
+            <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-3 flex gap-2 shrink-0">
+              <input
+                value={detectiveDraft}
+                onChange={(e) => setDetectiveDraft(e.target.value)}
+                className="pixel-input flex-1 text-xs"
+                placeholder="Mensaje al otro detective..."
+                autoFocus
+              />
+              <button type="submit" className="pixel-btn text-xs px-4 py-2">ENVIAR</button>
+            </form>
             <div className="md:hidden p-3 border-t-2 border-[var(--border)] bg-[var(--card)]">
               <button onClick={() => { SFX.soundClick(); skipToVote(); }} className="pixel-btn w-full py-3" style={headFont}>VOTAR AHORA</button>
             </div>
@@ -2048,12 +2400,12 @@ export default function Home() {
 
   /* ═══ RENDER: REVELATION ═══ */
   if (phase === "revelation") {
-    // Map culpability enum → human-readable Spanish labels + subtitle.
-    const culpabilityLabels: Record<string, { label: string; subtitle: string; color: string }> = {
-      guilty:    { label: "CULPABLE",  subtitle: "Cometió el crimen.", color: "text-[var(--destructive)]" },
-      innocent:  { label: "INOCENTE",  subtitle: "No tuvo nada que ver con el crimen.", color: "text-[#4ec9b0]" },
-      accomplice:{ label: "CÓMPLICE",  subtitle: "Ayudó al verdadero culpable, pero no lo planeó.", color: "text-[#fbbf24]" },
-      witness:   { label: "TESTIGO",   subtitle: "Solo vio o escuchó algo. No participó.", color: "text-[#60a5fa]" },
+    // Map culpability enum → human-readable Spanish labels (used in resumen table).
+    const culpabilityLabels: Record<string, { label: string; color: string }> = {
+      guilty:    { label: "CULPABLE",  color: "text-[var(--destructive)]" },
+      innocent:  { label: "INOCENTE",  color: "text-[#4ec9b0]" },
+      accomplice:{ label: "CÓMPLICE",  color: "text-[#fbbf24]" },
+      witness:   { label: "TESTIGO",   color: "text-[#60a5fa]" },
     };
     const culp = revelation ? culpabilityLabels[revelation.culpability] ?? culpabilityLabels.innocent : culpabilityLabels.innocent;
 
@@ -2067,29 +2419,15 @@ export default function Home() {
             <div className="pixel-frame p-8"><div className="text-sm text-[var(--primary)] animate-pulse tracking-widest">REVELANDO LA VERDAD...</div></div>
           ) : revelation && verdict ? (
             <>
-              {/* BANNER GRANDE — acertaron o se equivocaron */}
+              {/* BANNER — acertaron o se equivocaron (sin tick) */}
               <div className={cn("pixel-frame p-6 border-2", verdict.majorityCorrect ? "border-[#4ec9b0] bg-[#4ec9b0]/5" : "border-[var(--destructive)] bg-[var(--destructive)]/5")}>
-                <div className="text-3xl mb-2">{verdict.majorityCorrect ? "✓" : "✗"}</div>
                 <div className={cn("text-2xl md:text-3xl font-bold tracking-widest", verdict.majorityCorrect ? "text-[#4ec9b0]" : "text-[var(--destructive)]")} style={headFont}>
                   {verdict.majorityCorrect ? "ACERTARON" : "SE EQUIVOCARON"}
                 </div>
-                <div className="text-xs text-[var(--muted-foreground)] mt-2 tracking-wider">
-                  {verdict.majorityCorrect
-                    ? "Los detectives llegaron a la conclusión correcta."
-                    : "Los detectives tomaron la decisión equivocada."}
-                </div>
               </div>
 
-              {/* Responsabilidad real del sospechoso */}
-              <div className="pixel-frame p-5">
-                <div className="text-xs text-[var(--muted-foreground)] tracking-wider mb-3">REALIDAD SOBRE {safeRender(revelation.suspectName).toUpperCase()}</div>
-                <div className={cn("text-xl md:text-2xl font-bold tracking-widest", culp.color)} style={headFont}>{culp.label}</div>
-                <div className="text-xs text-[var(--muted-foreground)] mt-2 italic">{culp.subtitle}</div>
-              </div>
-
-              {/* Comparación: decisión vs realidad */}
+              {/* Resumen — decision vs realidad (sin título grande de CÓMPLICE) */}
               <div className="pixel-frame p-4">
-                <div className="text-xs text-[var(--muted-foreground)] tracking-wider mb-3">RESUMEN</div>
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div className="text-left">
                     <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider">DECISIÓN</div>
@@ -2106,14 +2444,14 @@ export default function Home() {
 
               {/* La verdad — texto largo */}
               <div className="pixel-frame p-5 text-left">
-                <div className="text-xs text-[var(--primary)] mb-2 tracking-wider" style={headFont}>📜 LO QUE REALMENTE SUCEDIÓ</div>
+                <div className="text-xs text-[var(--primary)] mb-2 tracking-wider" style={headFont}>LO QUE REALMENTE SUCEDIÓ</div>
                 <p className="text-sm text-[var(--foreground)] leading-relaxed">{safeRender(revelation.truth)}</p>
               </div>
 
               {/* Coartada */}
               {revelation.alibiClaimed && revelation.alibiActual && (
                 <div className="pixel-frame p-5 text-left">
-                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>🎭 COARTADA</div>
+                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>COARTADA</div>
                   <div className="space-y-3">
                     <div>
                       <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider mb-1">LO QUE DECLARÓ</div>
@@ -2123,12 +2461,6 @@ export default function Home() {
                       <div className="text-[11px] text-[var(--destructive)] tracking-wider mb-1">LO QUE REALMENTE HACÍA</div>
                       <p className="text-xs text-[var(--foreground)] leading-relaxed italic">"{safeRender(revelation.alibiActual)}"</p>
                     </div>
-                    {revelation.alibiWitnesses && revelation.alibiWitnesses.length > 0 && (
-                      <div className="border-t border-[var(--border)] pt-3">
-                        <div className="text-[11px] text-[var(--muted-foreground)] tracking-wider mb-1">POSIBLES TESTIGOS</div>
-                        <p className="text-xs text-[var(--foreground)] leading-relaxed">{revelation.alibiWitnesses.join(", ")}</p>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
@@ -2136,7 +2468,7 @@ export default function Home() {
               {/* Evidencia */}
               {revelation.evidence.length > 0 && (
                 <div className="pixel-frame p-5 text-left">
-                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>🔍 EVIDENCIA ({revelation.evidence.length})</div>
+                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>EVIDENCIA ({revelation.evidence.length})</div>
                   <div className="space-y-2">
                     {revelation.evidence.map((ev, i) => (
                       <div key={i} className={cn("p-2 border-l-2", ev.isRedHerring ? "border-[var(--destructive)] bg-[var(--destructive)]/5" : "border-[#4ec9b0] bg-[#4ec9b0]/5")}>
@@ -2147,21 +2479,6 @@ export default function Home() {
                           <span className="text-xs font-bold text-[var(--foreground)] tracking-wider">{safeRender(ev.label)}</span>
                         </div>
                         <p className="text-[12px] text-[var(--muted-foreground)] leading-relaxed mt-1">{safeRender(ev.description)}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Timeline */}
-              {revelation.timeline.length > 0 && (
-                <div className="pixel-frame p-5 text-left">
-                  <div className="text-xs text-[var(--primary)] mb-3 tracking-wider" style={headFont}>⏰ LÍNEA TEMPORAL REAL</div>
-                  <div className="space-y-1.5">
-                    {revelation.timeline.map((t, i) => (
-                      <div key={i} className="flex gap-3 text-xs">
-                        <span className="text-[var(--primary)] font-bold tracking-wider shrink-0 min-w-[55px]">{safeRender(t.time)}</span>
-                        <span className="text-[var(--foreground)] leading-relaxed">{safeRender(t.event)}</span>
                       </div>
                     ))}
                   </div>
@@ -2209,17 +2526,6 @@ export default function Home() {
             {unlockedAchievements.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4">Sin logros esta partida.</div> : (
               <div className="grid gap-2">{unlockedAchievements.map((ach) => (<div key={ach.id} className="pixel-frame p-2 flex items-center gap-3 text-left pixel-evidence-flash"><span className="text-xl">{ach.icon}</span><div><div className="text-xs font-bold text-[var(--primary)] tracking-wider">{ach.name}</div><div className="text-[13px] text-[var(--muted-foreground)]">{ach.description}</div></div></div>))}</div>
             )}
-          </div>
-
-          <div className="pixel-frame p-4">
-            <div className="text-xs text-[var(--muted-foreground)] mb-2 tracking-wider">ESTADÍSTICAS</div>
-            <div className="flex justify-center gap-6 text-xs">
-              <div className="text-center"><div className="text-sm font-bold text-[var(--primary)]">{questionsAsked}</div><div className="text-[12px] text-[var(--muted-foreground)]">PREGUNTAS</div></div>
-              <div className="text-center"><div className="text-sm font-bold text-[var(--destructive)]">{maxStress}%</div><div className="text-[12px] text-[var(--muted-foreground)]">ESTRÉS MAX</div></div>
-              <div className="text-center"><div className="text-sm font-bold text-[var(--primary)]">{flaggedCount}</div><div className="text-[12px] text-[var(--muted-foreground)]">FLAGGED</div></div>
-              <div className="text-center"><div className="text-sm font-bold text-[var(--foreground)]">{unlockedEvCount}/{totalEvCount}</div><div className="text-[12px] text-[var(--muted-foreground)]">EVIDENCIA</div></div>
-              <div className="text-center"><div className="text-sm font-bold text-[var(--foreground)]">{formatTime(totalTime - timeRemaining)}</div><div className="text-[12px] text-[var(--muted-foreground)]">TIEMPO</div></div>
-            </div>
           </div>
 
           <button onClick={() => { SFX.soundClick(); playAgain(); }} className="pixel-btn py-3 px-8" style={headFont}>JUGAR DE NUEVO</button>
