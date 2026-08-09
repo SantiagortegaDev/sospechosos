@@ -163,6 +163,7 @@ export default function Home() {
   const [difficulty, setDifficulty] = useState<"facil" | "normal" | "dificil">("normal");
   const [crimeTheme, setCrimeTheme] = useState<"random" | "fraude" | "robo" | "asesinato" | "sabotaje">("random");
   const [aiVoice, setAiVoice] = useState<"on" | "off">("on");
+  const [openSection, setOpenSection] = useState<string | null>(null);
   const [lobbyPlayers, setLobbyPlayers] = useState<
     Array<{ id: string; username: string; isHost: boolean }>
   >([]);
@@ -870,42 +871,84 @@ export default function Home() {
     );
   };
 
-  /* ─── Reusable option selector for create-screen settings ─── */
+  /* ─── Collapsible option selector — accordion style ─── */
   const OptionSelector = <T extends string | number>({
     label,
     value,
     options,
     onChange,
     disabled,
+    sectionKey,
   }: {
     label: string;
     value: T;
     options: Array<{ value: T; label: string; emoji?: string }>;
     onChange: (v: T) => void;
     disabled?: boolean;
-  }) => (
-    <div className="space-y-2">
-      <label className="text-xs text-[var(--foreground)] tracking-wider font-bold block">{label}</label>
-      <div className="grid grid-cols-2 gap-2">
-        {options.map((opt) => (
-          <button
-            key={String(opt.value)}
-            type="button"
-            onClick={() => { if (!disabled) { onChange(opt.value); SFX.soundClick(); } }}
-            disabled={disabled}
-            className={cn(
-              "pixel-frame p-2 text-center transition-all cursor-pointer",
-              value === opt.value && "pixel-frame-active",
-              disabled && "cursor-not-allowed opacity-40"
-            )}
-          >
-            {opt.emoji && <div className="text-sm mb-0.5">{opt.emoji}</div>}
-            <div className="text-[10px] tracking-wider text-[var(--foreground)]">{opt.label}</div>
-          </button>
-        ))}
+    sectionKey: string;
+  }) => {
+    const isOpen = openSection === sectionKey;
+    const selectedOpt = options.find((o) => o.value === value);
+    const summary = selectedOpt
+      ? `${selectedOpt.emoji ?? ""} ${selectedOpt.label}`.trim()
+      : "—";
+    return (
+      <div className={cn("pixel-frame overflow-hidden", isOpen && "pixel-frame-active")}>
+        {/* Header — click to toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            if (disabled) return;
+            setOpenSection(isOpen ? null : sectionKey);
+            SFX.soundTab();
+          }}
+          disabled={disabled}
+          className={cn(
+            "w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors cursor-pointer",
+            !isOpen && "hover:bg-[var(--primary)]/5",
+            disabled && "cursor-not-allowed opacity-40"
+          )}
+        >
+          <span className="text-xs text-[var(--foreground)] tracking-wider font-bold">
+            {label}
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="text-[10px] text-[var(--primary)] tracking-wider font-bold">
+              {summary}
+            </span>
+            <span className={cn("text-[var(--primary)] transition-transform", isOpen && "rotate-90")}>
+              ▸
+            </span>
+          </span>
+        </button>
+        {/* Body — collapsible */}
+        {isOpen && (
+          <div className="px-3 pb-3 pt-1 grid grid-cols-2 gap-2 pixel-scale-in">
+            {options.map((opt) => (
+              <button
+                key={String(opt.value)}
+                type="button"
+                onClick={() => {
+                  if (disabled) return;
+                  onChange(opt.value);
+                  SFX.soundClick();
+                }}
+                disabled={disabled}
+                className={cn(
+                  "pixel-frame p-2 text-center transition-all cursor-pointer",
+                  value === opt.value && "pixel-frame-active",
+                  disabled && "cursor-not-allowed opacity-40"
+                )}
+              >
+                {opt.emoji && <div className="text-sm mb-0.5">{opt.emoji}</div>}
+                <div className="text-[10px] tracking-wider text-[var(--foreground)]">{opt.label}</div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
 
   /* ═══ RENDER: TUTORIAL ═══ */
   if (showTutorial) {
@@ -984,6 +1027,7 @@ export default function Home() {
             label="DETECTIVES MÁXIMOS"
             value={maxDetectives}
             onChange={setMaxDetectives}
+            sectionKey="maxDetectives"
             options={[
               { value: 2, label: "2 DETECTIVES", emoji: "👥" },
               { value: 3, label: "3 DETECTIVES", emoji: "👨‍👩‍👦" },
@@ -995,6 +1039,7 @@ export default function Home() {
             label="DIFICULTAD DEL CASO"
             value={difficulty}
             onChange={setDifficulty}
+            sectionKey="difficulty"
             options={[
               { value: "facil", label: "FÁCIL", emoji: "🟢" },
               { value: "normal", label: "NORMAL", emoji: "🟡" },
@@ -1006,6 +1051,7 @@ export default function Home() {
             label="TEMA DEL CRIMEN"
             value={crimeTheme}
             onChange={setCrimeTheme}
+            sectionKey="crimeTheme"
             options={[
               { value: "random", label: "ALEATORIO", emoji: "🎲" },
               { value: "fraude", label: "FRAUDE", emoji: "💰" },
@@ -1019,6 +1065,7 @@ export default function Home() {
             label="VOZ DEL SOSPECHOSO"
             value={aiVoice}
             onChange={setAiVoice}
+            sectionKey="aiVoice"
             options={[
               { value: "on", label: "ACTIVADA", emoji: "🔊" },
               { value: "off", label: "SILENCIADA", emoji: "🔇" },
