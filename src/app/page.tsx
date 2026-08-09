@@ -940,6 +940,7 @@ export default function Home() {
 
   const TimeSlider = ({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled?: boolean }) => {
     const fillPercent = ((value - 3) / (15 - 3)) * 100;
+    const marks = [3, 5, 7, 10, 15];
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -958,7 +959,7 @@ export default function Home() {
           onChange={(e) => { onChange(Number(e.target.value)); SFX.soundClick(); }}
           disabled={disabled}
           className="pixel-slider w-full"
-          style={{ '--slider-fill': `${fillPercent}%` } as React.CSSProperties}
+          style={{ '--slider-fill': `${fillPercent}%`, touchAction: 'none' } as React.CSSProperties}
         />
         <div className="flex justify-between px-0.5">
           {marks.map((m) => (
@@ -999,9 +1000,11 @@ export default function Home() {
   }) => {
     const isOpen = openSection === sectionKey;
     const selectedOpt = options.find((o) => o.value === value);
+    const emojiColorMap: Record<string, string> = { "[GREEN]": "text-green-400", "[YELLOW]": "text-yellow-400", "[RED]": "text-red-400", "[BLUE]": "text-blue-400", "[GRAY]": "text-gray-400" };
     const summary = selectedOpt
-      ? `${selectedOpt.emoji ?? ""} ${selectedOpt.label}`.trim()
+      ? `${selectedOpt.emoji ? "●" : ""} ${selectedOpt.label}`.trim()
       : "—";
+    const summaryColor = selectedOpt?.emoji ? (emojiColorMap[selectedOpt.emoji] ?? "text-[var(--muted-foreground)]") : "text-[var(--muted-foreground)]";
     return (
       <div className={cn("pixel-frame overflow-hidden", isOpen && "pixel-frame-active")}>
         {/* Header — click to toggle */}
@@ -1023,7 +1026,7 @@ export default function Home() {
             {label}
           </span>
           <span className="flex items-center gap-2">
-            <span className="text-[13px] text-[var(--primary)] tracking-wider font-bold">
+            <span className={cn("text-[13px] tracking-wider font-bold", summaryColor)}>
               {summary}
             </span>
             <span className={cn("text-[var(--primary)] transition-transform", isOpen && "rotate-90")}>
@@ -1050,7 +1053,7 @@ export default function Home() {
                   disabled && "cursor-not-allowed opacity-40"
                 )}
               >
-                {opt.emoji && <div className="text-sm mb-0.5">{opt.emoji}</div>}
+                {opt.emoji && <div className={cn("text-sm mb-0.5", emojiColorMap[opt.emoji] ?? "text-[var(--muted-foreground)]")}>●</div>}
                 <div className="text-[13px] tracking-wider text-[var(--foreground)]">{opt.label}</div>
               </button>
             ))}
@@ -1138,9 +1141,9 @@ export default function Home() {
             onChange={setMaxDetectives}
             sectionKey="maxDetectives"
             options={[
-              { value: 2, label: "2 DETECTIVES", emoji: "" },
-              { value: 3, label: "3 DETECTIVES", emoji: "" },
-              { value: 4, label: "4 DETECTIVES", emoji: "" },
+              { value: 2, label: "2 DETECTIVES", emoji: "[BLUE]" },
+              { value: 3, label: "3 DETECTIVES", emoji: "[BLUE]" },
+              { value: 4, label: "4 DETECTIVES", emoji: "[BLUE]" },
             ]}
           />
 
@@ -1150,9 +1153,9 @@ export default function Home() {
             onChange={setDifficulty}
             sectionKey="difficulty"
             options={[
-              { value: "facil", label: "FÁCIL", emoji: "[OK]" },
-              { value: "normal", label: "NORMAL", emoji: "[!]" },
-              { value: "dificil", label: "DIFÍCIL", emoji: "[XX]" },
+              { value: "facil", label: "FÁCIL", emoji: "[GREEN]" },
+              { value: "normal", label: "NORMAL", emoji: "[YELLOW]" },
+              { value: "dificil", label: "DIFÍCIL", emoji: "[RED]" },
             ]}
           />
 
@@ -1162,11 +1165,11 @@ export default function Home() {
             onChange={setCrimeTheme}
             sectionKey="crimeTheme"
             options={[
-              { value: "random", label: "ALEATORIO", emoji: "" },
-              { value: "fraude", label: "FRAUDE", emoji: "" },
-              { value: "robo", label: "ROBO", emoji: "" },
-              { value: "asesinato", label: "ASESINATO", emoji: "" },
-              { value: "sabotaje", label: "SABOTAJE", emoji: "" },
+              { value: "random", label: "ALEATORIO", emoji: "[GRAY]" },
+              { value: "fraude", label: "FRAUDE", emoji: "[YELLOW]" },
+              { value: "robo", label: "ROBO", emoji: "[RED]" },
+              { value: "asesinato", label: "ASESINATO", emoji: "[RED]" },
+              { value: "sabotaje", label: "SABOTAJE", emoji: "[YELLOW]" },
             ]}
           />
 
@@ -1176,8 +1179,8 @@ export default function Home() {
             onChange={setAiVoice}
             sectionKey="aiVoice"
             options={[
-              { value: "on", label: "ACTIVADA", emoji: "[SND]" },
-              { value: "off", label: "SILENCIADA", emoji: "[MUTE]" },
+              { value: "on", label: "ACTIVADA", emoji: "[GREEN]" },
+              { value: "off", label: "SILENCIADA", emoji: "[GRAY]" },
             ]}
           />
 
@@ -1378,7 +1381,7 @@ export default function Home() {
                       <div className="flex items-center gap-2">
                         <span className="text-sm">{ev.isRedHerring ? "🔴" : ev.isLocked ? "🔒" : "📄"}</span>
                         <span className="text-xs font-bold text-[var(--foreground)] tracking-wider">{ev.label}</span>
-                        {ev.isRedHerring && <span className="pixel-badge danger text-[11px]">PISTA FALSA</span>}
+                        {ev.isRedHerring && <span className="pixel-badge danger text-xs">PISTA FALSA</span>}
                       </div>
                       {!ev.isLocked && <div className="text-xs text-[var(--muted-foreground)] mt-1">{ev.description}</div>}
                       {ev.isLocked && <div className="text-[13px] text-[var(--primary)]/70 mt-1 italic">💡 {hint}</div>}
@@ -1415,7 +1418,7 @@ export default function Home() {
             </div>
             <form onSubmit={handleSendDetective} className="border-t-2 border-[var(--border)] p-3 flex gap-2 shrink-0">
               <input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." />
-              <button type="submit" className="pixel-btn text-[11px] px-2">ENVIAR</button>
+              <button type="submit" className="pixel-btn text-xs px-2">ENVIAR</button>
             </form>
           </aside>
         </div>
@@ -1563,9 +1566,9 @@ export default function Home() {
             )}
             {rightTab === "timeline" && (
               <div className="space-y-2">
-                <div className="flex items-center justify-between"><div className="text-xs text-[var(--primary)] font-bold">LÍNEA TEMPORAL</div><button onClick={() => { SFX.soundClick(); addTimelineEntry(); }} className="pixel-btn-secondary text-[11px] py-1 px-2">+ AGREGAR</button></div>
+                <div className="flex items-center justify-between"><div className="text-xs text-[var(--primary)] font-bold">LÍNEA TEMPORAL</div><button onClick={() => { SFX.soundClick(); addTimelineEntry(); }} className="pixel-btn-secondary text-xs py-1 px-2">+ AGREGAR</button></div>
                 {timelineEntries.length === 0 ? <div className="text-xs text-[var(--muted-foreground)] italic py-4 text-center">Sin eventos</div> : (
-                  <div className="space-y-2">{timelineEntries.map((entry) => (<div key={entry.id} className="pixel-frame p-2"><div className="text-[13px] text-[var(--primary)] font-bold tracking-wider">{entry.label}</div><div className="text-xs text-[var(--foreground)] mt-0.5">{entry.description}</div><div className="text-[11px] text-[var(--muted-foreground)] mt-1">— {entry.addedByName}</div></div>))}</div>
+                  <div className="space-y-2">{timelineEntries.map((entry) => (<div key={entry.id} className="pixel-frame p-2"><div className="text-[13px] text-[var(--primary)] font-bold tracking-wider">{entry.label}</div><div className="text-xs text-[var(--foreground)] mt-0.5">{entry.description}</div><div className="text-xs text-[var(--muted-foreground)] mt-1">— {entry.addedByName}</div></div>))}</div>
                 )}
               </div>
             )}
@@ -1576,7 +1579,7 @@ export default function Home() {
                   {detectiveMessages.map((dm, i) => (<div key={i} className="text-xs"><span className="text-[var(--primary)] font-bold">[{dm.detectiveName}]:</span> <span className="text-[var(--foreground)]">{dm.text}</span></div>))}
                   {detectiveMessages.length === 0 && <div className="text-xs text-[var(--muted-foreground)] italic text-center py-4">Sin mensajes privados</div>}
                 </div>
-                <form onSubmit={handleSendDetective} className="flex gap-1"><input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." /><button type="submit" className="pixel-btn text-[11px] px-2">ENVIAR</button></form>
+                <form onSubmit={handleSendDetective} className="flex gap-1"><input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." /><button type="submit" className="pixel-btn text-xs px-2">ENVIAR</button></form>
               </div>
             )}
             {rightTab === "herramientas" && (
@@ -1586,7 +1589,7 @@ export default function Home() {
                   {TECHNIQUES.map((t) => (
                     <button key={t.key} onClick={() => { SFX.soundClick(); setTechnique(t.key); }} className={cn("pixel-frame p-2 text-center transition-all cursor-pointer", technique === t.key && "pixel-frame-active")}>
                       <div className="text-sm">{t.emoji}</div>
-                      <div className="text-[11px] text-[var(--foreground)] tracking-wider">{t.label}</div>
+                      <div className="text-xs text-[var(--foreground)] tracking-wider">{t.label}</div>
                     </button>
                   ))}
                 </div>
@@ -1605,7 +1608,7 @@ export default function Home() {
         <header className="border-b border-[var(--border)] bg-[var(--card)] px-4 py-2 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-4">
             <span className="text-[var(--primary)] pixel-live-dot" />
-            <span className="text-xs tracking-wider text-[var(--foreground)] font-bold">INTERROGACION</span>
+            <span className="text-sm tracking-wider text-[var(--foreground)] font-bold">INTERROGACION</span>
             <span className="pixel-badge text-xs">PREGUNTAS: {questionsAsked}</span>
           </div>
           <div className="flex items-center gap-4">
@@ -1616,6 +1619,11 @@ export default function Home() {
             <button onClick={() => { SFX.soundClick(); enterDeliberation(); }} className="pixel-btn-danger text-xs py-1 px-3">DELIBERAR</button>
           </div>
         </header>
+
+        {/* Phase stepper navigation */}
+        <div className="border-b border-[var(--border)] bg-[var(--card)] px-4 py-1.5 shrink-0 overflow-x-auto">
+          <PhaseIndicator current="playing" />
+        </div>
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* LEFT: Suspect panel */}
@@ -1649,7 +1657,7 @@ export default function Home() {
                   )}>
                     <span className="text-sm">❤</span>
                     <span className="text-sm font-bold tabular-nums">{bpm}</span>
-                    <span className="text-[11px] opacity-70">BPM</span>
+                    <span className="text-xs opacity-70">BPM</span>
                   </div>
                 </div>
                 <StressBar label="ESTRÉS" value={stress.stress} colorClass="stress" emoji="🔵" />
@@ -1701,7 +1709,7 @@ export default function Home() {
                           <span>[{msg.senderName || "SOSPECHOSO"}]</span>
                         </div>
                         <div className={cn("pixel-frame p-2.5 text-sm", msg.type === "suspect.autonomous" ? "text-[var(--muted-foreground)] italic border-r-2 border-r-[var(--border)]" : "text-[var(--foreground)] border-r-2 border-r-[#2a2a44]")}>
-                          {msg.type === "suspect.autonomous" && <span className="text-[11px] text-[var(--muted-foreground)] tracking-wider block mb-1">*pensamiento autónomo*</span>}
+                          {msg.type === "suspect.autonomous" && <span className="text-xs text-[var(--muted-foreground)] tracking-wider block mb-1">*pensamiento autónomo*</span>}
                           <TypewriterText text={msg.text} speed={22} />
                         </div>
                       </div>
@@ -1713,7 +1721,7 @@ export default function Home() {
               <div ref={chatEndRef} />
             </div>
             <form onSubmit={handleInterrogate} className="border-t-2 border-[var(--border)] bg-[var(--card)] p-2 flex gap-2 shrink-0">
-              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-[11px] text-[var(--destructive)]">📎 {selectedEvidence.label}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
+              {selectedEvidence && <div className="flex items-center gap-1 px-2 border border-[var(--destructive)] bg-[var(--destructive)]/10"><span className="text-xs text-[var(--destructive)]">📎 {selectedEvidence.label}</span><button type="button" onClick={() => { SFX.soundClick(); setSelectedEvidence(null); }} className="text-[var(--destructive)] hover:text-white text-xs">✕</button></div>}
               <input ref={chatInputRef} value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder={selectedEvidence ? "Presentando evidencia..." : technique !== "neutral" ? `[${technique.toUpperCase()}] Pregunta al sospechoso...` : "Pregunta al sospechoso..."} disabled={pending} />
               <button type="submit" disabled={pending || !chatDraft.trim()} className="pixel-btn text-xs px-4">{pending ? "..." : "ENVIAR"}</button>
             </form>
@@ -1745,7 +1753,7 @@ export default function Home() {
 
         <div className="md:hidden flex border-t-2 border-[var(--border)] bg-[var(--card)]">
           {[{ key: "chat" as const, label: "💬 CHAT" }, { key: "sospechoso" as const, label: `${suspect.avatar} SOSPECHOSO` }, { key: "panel" as const, label: "📋 PANEL" }].map((tab) => (
-            <button key={tab.key} onClick={() => { setMobileTab(tab.key); SFX.soundTab(); }} className={cn("flex-1 py-2 text-[11px] tracking-wider transition-colors cursor-pointer", mobileTab === tab.key ? "text-[var(--primary)] bg-[var(--primary)]/5 border-b-2 border-[var(--primary)]" : "text-[var(--muted-foreground)]")} style={bodyFont}>{tab.label}</button>
+            <button key={tab.key} onClick={() => { setMobileTab(tab.key); SFX.soundTab(); }} className={cn("flex-1 py-2 text-xs tracking-wider transition-colors cursor-pointer", mobileTab === tab.key ? "text-[var(--primary)] bg-[var(--primary)]/5 border-b-2 border-[var(--primary)]" : "text-[var(--muted-foreground)]")} style={bodyFont}>{tab.label}</button>
           ))}
         </div>
       </div>

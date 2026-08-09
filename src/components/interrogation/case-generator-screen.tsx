@@ -156,8 +156,11 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack: _onBack 
       <div className="w-full max-w-xl">
         {/* Seed display */}
         <div className="text-center mb-4 pixel-slide-in-up">
-          <div className="text-xs tracking-[0.4em] text-[var(--muted-foreground)]">
-            GENERANDO CASO... // SEMILLA: {seed}
+          <div className="text-sm tracking-[0.3em] text-[var(--primary)] font-bold">
+            GENERANDO CASO..
+          </div>
+          <div className="text-[10px] tracking-[0.3em] text-[var(--muted-foreground)] mt-1">
+            SEMILLA: {seed}
           </div>
         </div>
 
@@ -229,12 +232,12 @@ export function CaseGeneratorScreen({ initialSeed, onCaseReady, onBack: _onBack 
             </div>
           )}
 
-          {/* Seed controls */}
-          <div className="space-y-3 pt-3 border-t border-[var(--border)]">
+          {/* Reroll button */}
+          <div className="pt-3 border-t border-[var(--border)]">
             <button
               onClick={reroll}
               disabled={loading}
-              className="pixel-btn w-full py-3 text-xs"
+              className="pixel-btn-secondary w-full py-2 text-xs tracking-wider"
             >
               {loading ? "GENERANDO..." : "GENERAR NUEVO CASO"}
             </button>

@@ -122,6 +122,7 @@
   }
   html, body {
     @apply text-foreground;
+    font-size: 16px;
     background:
       radial-gradient(ellipse at center, transparent 0%, transparent 45%, rgba(0, 0, 0, 0.55) 100%),
       linear-gradient(to bottom,
@@ -698,7 +699,8 @@
   100% { opacity: 0; }
 }
 .pixel-screen-flash {
-  animation: pixel-screen-flash 0.5s ease-out forwards;
+  animation: pixel-screen-flash 200ms ease-out forwards;
+  will-change: opacity;
 }
 
 @keyframes pixel-vote-glow {
@@ -964,7 +966,7 @@
   font-size: 0.72rem;
 }
 .pixel-chat-compact [class*="text-xs"] {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
 }
 .pixel-chat-compact .max-w-\\[80\\%\\] {
   max-width: 75%;
