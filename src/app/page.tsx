@@ -211,6 +211,7 @@ export default function Home() {
   }, [sfxEnabled]);
 
   const [showTutorial, setShowTutorial] = useState(false);
+  const [showAudioModal, setShowAudioModal] = useState(false);
   const [tutorialChecked, setTutorialChecked] = useState(false);
 
   /* Welcome flash */
@@ -451,6 +452,16 @@ export default function Home() {
           setStress({ stress: su.stress, confidence: su.confidence, hostility: su.hostility, trigger: su.trigger });
         }
 
+        // Evidence unlock broadcast — the other detective unlocked evidence
+        // via their question, sync our local state.
+        if (type === "evidence.unlock") {
+          const ids = (payload.ids as string[]) ?? [];
+          if (ids.length > 0) {
+            setEvidenceItems((prev) => prev.map(ev => ids.includes(ev.id) ? { ...ev, isLocked: false } : ev));
+            SFX.soundEvidenceUnlock();
+          }
+        }
+
         if (type === "ai.event") {
           const evt = payload as AIEventPayload;
           const aiMsg: GameMessage = {
@@ -517,7 +528,7 @@ export default function Home() {
 
         if (type === "game.phase") {
           const newPhase = payload.phase as GamePhase;
-          if ("evidence_review,deliberation,vote,verdict,revelation,results".split(",").includes(newPhase)) {
+          if ("playing,evidence_review,deliberation,vote,verdict,revelation,results".split(",").includes(newPhase)) {
             setPhase(newPhase);
           }
         }
@@ -591,7 +602,9 @@ export default function Home() {
     if (nervousnessRef.current) clearInterval(nervousnessRef.current);
     setDelibTimeRemaining(DELIBERATION_SECONDS);
     setPhase("deliberation");
-  }, []);
+    // Broadcast phase change so the other detective transitions too.
+    try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "deliberation" } }); } catch { /* ignore */ }
+  }, [sendGame]);
 
   const unlockAchievement = useCallback(
     (id: string) => {
@@ -755,13 +768,15 @@ export default function Home() {
           // expires and we auto-transition to the vote phase.
           setFrozenRequiredVotes(Math.max(1, lobbyPlayersRef.current));
           setPhase("vote");
+          // Broadcast phase change so both detectives transition together.
+          try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "vote" } }); } catch { /* ignore */ }
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => { if (delibTimerRef.current) clearInterval(delibTimerRef.current); };
-  }, [phase]);
+  }, [phase, sendGame]);
 
   /* Evidence review timer */
   useEffect(() => {
@@ -967,8 +982,10 @@ export default function Home() {
     setVerdict(null); setEnding(null); setRevelation(null);
     setTurnState({ status: "idle", proposerId: null, proposerName: null, proposedText: "", timerEndsAt: null });
     setPhase("playing");
+    // Broadcast phase change so the other detective starts playing too.
+    try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "playing" } }); } catch { /* ignore */ }
     SFX.soundWhoosh();
-  }, [currentCase, roundTime]);
+  }, [currentCase, roundTime, sendGame]);
 
   /* ═══ TURN-BASED INTERROGATION ═══
    * With 2 detectives, one PROPOSES a question, the other can APPROVE / EDIT /
@@ -998,11 +1015,11 @@ export default function Home() {
 
     // Evidence unlocks (regex + keyword fallback)
     const qLower = text.toLowerCase();
-    let unlockedSomething = false;
+    const unlockedIds: string[] = [];
     setEvidenceItems((prev) => prev.map(ev => {
       if (!ev.isLocked) return ev;
       if (ev.unlockTopic) {
-        try { if (new RegExp(ev.unlockTopic, "i").test(qLower)) { unlockedSomething = true; return { ...ev, isLocked: false }; } } catch { /* invalid regex */ }
+        try { if (new RegExp(ev.unlockTopic, "i").test(qLower)) { unlockedIds.push(ev.id); return { ...ev, isLocked: false }; } } catch { /* invalid regex */ }
       }
       const keywordSource = `${ev.label} ${ev.description}`.toLowerCase();
       const keywords = keywordSource
@@ -1010,11 +1027,17 @@ export default function Home() {
         .filter(w => w.length >= 4 && !["para","como","cuando","donde","porque","tiene","esto","esos","este","con","sin","sobre","tras","desde","hasta","entre"].includes(w));
       const uniqueKeywords = [...new Set(keywords)].slice(0, 8);
       for (const kw of uniqueKeywords) {
-        if (qLower.includes(kw)) { unlockedSomething = true; return { ...ev, isLocked: false }; }
+        if (qLower.includes(kw)) { unlockedIds.push(ev.id); return { ...ev, isLocked: false }; }
       }
       return ev;
     }));
-    if (unlockedSomething) SFX.soundEvidenceUnlock();
+    if (unlockedIds.length > 0) {
+      SFX.soundEvidenceUnlock();
+      // Broadcast evidence unlocks to the other detective.
+      try {
+        sendGame({ type: "evidence.unlock", content: { type: "evidence.unlock", ids: unlockedIds } });
+      } catch { /* ignore */ }
+    }
 
     try {
       const stressRulesRaw = currentCase.suspect.stressRules.map(r => ({
@@ -1064,7 +1087,13 @@ export default function Home() {
       const answerText = data.answer?.text || "No tengo nada que decir.";
       const aMsg: GameMessage = { type: "suspect.answer", senderType: "suspect", senderId: currentCase.suspect.id, senderName: currentCase.suspect.name, text: answerText, timestamp: Date.now(), flagged: data.answer?.flagged };
       setChatMessages((prev) => [...prev.slice(-80), aMsg]);
-      try { await sendGame({ type: "suspect.answer", content: aMsg }); } catch { /* ok */ }
+      // Broadcast suspect.answer with retry — the other detective MUST see
+      // the response, so we send it multiple times to survive packet loss.
+      const broadcastAnswer = (attempt: number) => {
+        try { sendGame({ type: "suspect.answer", content: aMsg }); } catch { /* ignore */ }
+        if (attempt < 4) setTimeout(() => broadcastAnswer(attempt + 1), 300 * (attempt + 1));
+      };
+      broadcastAnswer(0);
       setConversationHistory((prev) => [...prev.slice(-40), newTurn, { role: "suspect", text: answerText, timestamp: Date.now() }]);
 
       const prevStressLevel = stress?.stress ?? 0;
@@ -1075,6 +1104,21 @@ export default function Home() {
       if (data.stress) {
         setStress(data.stress);
         if (data.stress.stress > maxStress) setMaxStress(data.stress.stress);
+        // Broadcast stress update so the other detective's stress bars sync.
+        try {
+          sendGame({
+            type: "stress.update",
+            content: {
+              type: "stress.update",
+              suspectId: currentCase.suspect.id,
+              stress: data.stress.stress,
+              confidence: data.stress.confidence,
+              hostility: data.stress.hostility,
+              trigger: data.stress.trigger,
+              timestamp: Date.now(),
+            },
+          });
+        } catch { /* ignore */ }
       }
       if (data.answer?.flagged) {
         setFlaggedCount((prev) => prev + 1);
@@ -1206,7 +1250,9 @@ export default function Home() {
     // broadcasts don't change the threshold mid-vote.
     setFrozenRequiredVotes(Math.max(1, lobbyPlayers.length));
     setPhase("vote");
-  }, [lobbyPlayers.length]);
+    // Broadcast phase change so the other detective transitions too.
+    try { sendGame({ type: "game.phase", content: { type: "game.phase", phase: "vote" } }); } catch { /* ignore */ }
+  }, [lobbyPlayers.length, sendGame]);
 
   const handleSubmitVote = useCallback(async () => {
     if (!voteChoice || !session) return;
@@ -1902,9 +1948,8 @@ export default function Home() {
       );
     };
 
-    const RightTabs = () => {
+    const rightTabsContent = (() => {
       const tabList = [
-        { key: "expediente" as const, label: "EXPEDIENTE" },
         { key: "evidencia" as const, label: `EVIDENCIA (${unlockedCount}/${totalEvCount})` },
         { key: "detectives" as const, label: detectiveUnreadCount > 0 && rightTab !== "detectives" ? `DETECTIVES (${detectiveUnreadCount})` : "DETECTIVES" },
         { key: "herramientas" as const, label: "HERRAMIENTAS" },
@@ -2080,7 +2125,7 @@ export default function Home() {
           </div>
         </div>
       );
-    };
+    })();
 
     return (
       <div className="min-h-screen flex flex-col pixel-fade-in" style={bodyFont}>
@@ -2093,17 +2138,9 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-1 sm:gap-4 shrink-0">
             <span className={cn("text-sm font-bold", timeRemaining <= 60 ? "text-[var(--destructive)] pixel-timer-warning" : "text-[var(--primary)]")} style={headFont}>{formatTime(timeRemaining)}</span>
-            <div className="flex items-center gap-1">
-              <button onClick={() => { SFX.soundClick(); const m = SFX.toggleSfxMuted(); setMutedState(m); }} className="pixel-btn-secondary text-[10px] py-1 px-2" title="Efectos de sonido">
-                {sfxEnabled === "on" ? "SFX" : "SFX—"}
-              </button>
-              <button onClick={() => { const m = SFX.toggleMusicMuted(); setMusicEnabled(m ? "off" : "on"); }} className="pixel-btn-secondary text-[10px] py-1 px-2" title="Música ambiental">
-                {musicEnabled === "on" ? "MUS" : "MUS—"}
-              </button>
-              <button onClick={() => { const m = SFX.toggleVoiceMuted(); setAiVoice(m ? "off" : "on"); }} className="pixel-btn-secondary text-[10px] py-1 px-2" title="Voz del sospechoso">
-                {aiVoice === "on" ? "VOZ" : "VOZ—"}
-              </button>
-            </div>
+            <button onClick={() => { SFX.soundClick(); setShowAudioModal(true); }} className="pixel-btn-secondary text-[10px] sm:text-xs py-1 px-2 sm:px-3" title="Configuración de audio">
+              AUDIO
+            </button>
             <button onClick={() => { SFX.soundClick(); enterDeliberation(); }} className="pixel-btn-danger text-[10px] sm:text-xs py-1 px-2 sm:px-3">DELIBERAR</button>
           </div>
         </header>
@@ -2224,7 +2261,7 @@ export default function Home() {
                   <div className="text-[11px] text-[var(--muted-foreground)] italic text-center">Esperando aprobación del otro detective (o auto-envío en 10s)...</div>
                 ) : (
                   <div className="flex gap-2">
-                    <button onClick={() => { SFX.soundClick(); handleApproveProposal(); }} className="pixel-btn flex-1 text-xs py-2">✓ APROBAR Y ENVIAR</button>
+                    <button onClick={() => { SFX.soundClick(); handleApproveProposal(); }} className="pixel-btn flex-1 text-xs py-2">APROBAR Y ENVIAR</button>
                     <button onClick={() => { SFX.soundClick(); handleRejectProposal(); }} className="pixel-btn-danger flex-1 text-xs py-2">✕ RECHAZAR</button>
                   </div>
                 )}
@@ -2238,7 +2275,7 @@ export default function Home() {
           </section>
 
           {/* RIGHT: Tabbed panel */}
-          <aside className="hidden md:flex flex-col w-72 border-l-2 border-[var(--border)] bg-[var(--card)] shrink-0"><RightTabs /></aside>
+          <aside className="hidden md:flex flex-col w-72 border-l-2 border-[var(--border)] bg-[var(--card)] shrink-0">{rightTabsContent}</aside>
 
           {/* MOBILE: Suspect panel */}
           <div className={cn("md:hidden flex-1 overflow-y-auto pixel-scroll p-4", mobileTab !== "sospechoso" && "hidden")}>
@@ -2258,7 +2295,7 @@ export default function Home() {
           </div>
 
           {/* MOBILE: Panel tab */}
-          <div className={cn("md:hidden flex-1 overflow-hidden flex flex-col", mobileTab !== "panel" && "hidden")}><RightTabs /></div>
+          <div className={cn("md:hidden flex-1 overflow-hidden flex flex-col", mobileTab !== "panel" && "hidden")}>{rightTabsContent}</div>
         </div>
 
         <div className="md:hidden flex border-t-2 border-[var(--border)] bg-[var(--card)]">
@@ -2266,6 +2303,46 @@ export default function Home() {
             <button key={tab.key} onClick={() => { setMobileTab(tab.key); SFX.soundTab(); }} className={cn("flex-1 py-2 text-xs tracking-wider transition-colors cursor-pointer", mobileTab === tab.key ? "text-[var(--primary)] bg-[var(--primary)]/5 border-b-2 border-[var(--primary)]" : "text-[var(--muted-foreground)]")} style={bodyFont}>{tab.label}</button>
           ))}
         </div>
+
+        {/* Audio settings modal */}
+        {showAudioModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowAudioModal(false)}>
+            <div className="pixel-frame max-w-sm w-full p-6 space-y-5 pixel-scale-in" style={bodyFont} onClick={(e) => e.stopPropagation()}>
+              <div className="pixel-header"><span>CONFIGURACIÓN DE AUDIO</span></div>
+
+              <div className="space-y-4">
+                <div className="pixel-frame p-3">
+                  <div className="text-xs text-[var(--foreground)] tracking-wider font-bold mb-2">EFECTOS DE SONIDO</div>
+                  <div className="text-[11px] text-[var(--muted-foreground)] mb-3">Clicks, blips, estrés, logros</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { SFX.soundClick(); setSfxEnabled("on"); }} className={cn("pixel-frame flex-1 py-2 text-xs cursor-pointer", sfxEnabled === "on" && "pixel-frame-active")}>ACTIVADOS</button>
+                    <button onClick={() => { setSfxEnabled("off"); }} className={cn("pixel-frame flex-1 py-2 text-xs cursor-pointer", sfxEnabled === "off" && "pixel-frame-active")}>DESACTIVADOS</button>
+                  </div>
+                </div>
+
+                <div className="pixel-frame p-3">
+                  <div className="text-xs text-[var(--foreground)] tracking-wider font-bold mb-2">MÚSICA AMBIENTAL</div>
+                  <div className="text-[11px] text-[var(--muted-foreground)] mb-3">Música de fondo detective</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { SFX.soundClick(); setMusicEnabled("on"); }} className={cn("pixel-frame flex-1 py-2 text-xs cursor-pointer", musicEnabled === "on" && "pixel-frame-active")}>ACTIVADA</button>
+                    <button onClick={() => { setMusicEnabled("off"); }} className={cn("pixel-frame flex-1 py-2 text-xs cursor-pointer", musicEnabled === "off" && "pixel-frame-active")}>DESACTIVADA</button>
+                  </div>
+                </div>
+
+                <div className="pixel-frame p-3">
+                  <div className="text-xs text-[var(--foreground)] tracking-wider font-bold mb-2">VOZ DEL SOSPECHOSO</div>
+                  <div className="text-[11px] text-[var(--muted-foreground)] mb-3">El sospechoso habla en voz alta</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { SFX.soundClick(); setAiVoice("on"); }} className={cn("pixel-frame flex-1 py-2 text-xs cursor-pointer", aiVoice === "on" && "pixel-frame-active")}>ACTIVADA</button>
+                    <button onClick={() => { setAiVoice("off"); }} className={cn("pixel-frame flex-1 py-2 text-xs cursor-pointer", aiVoice === "off" && "pixel-frame-active")}>DESACTIVADA</button>
+                  </div>
+                </div>
+              </div>
+
+              <button onClick={() => { SFX.soundClick(); setShowAudioModal(false); }} className="pixel-btn w-full py-3" style={headFont}>CERRAR</button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
