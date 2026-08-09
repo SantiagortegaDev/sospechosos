@@ -1420,7 +1420,7 @@ export default function Home() {
             <div className="pixel-header"><span>CHAT PRIVADO</span></div>
             <div className="flex-1 p-3 pixel-scroll overflow-y-auto space-y-2 min-h-0">
               {detectiveMessages.map((dm, i) => (
-                <div key={i} className="text-xs"><span className="text-[var(--primary)] font-bold">[{dm.detectiveName}]:</span> <span className="text-[var(--foreground)]">{dm.text}</span></div>
+                <div key={i} className="text-xs"><span className="text-[var(--primary)] font-bold">[{safeRender(dm.detectiveName)}]:</span> <span className="text-[var(--foreground)]">{safeRender(dm.text)}</span></div>
               ))}
               {detectiveMessages.length === 0 && <div className="text-xs text-[var(--muted-foreground)] italic text-center py-4">Discute la evidencia con tu compañero...</div>}
             </div>
@@ -1584,7 +1584,7 @@ export default function Home() {
               <div className="flex flex-col h-64">
                 <div className="text-xs text-[var(--primary)] font-bold mb-2">CHAT PRIVADO — DETECTIVES</div>
                 <div className="flex-1 pixel-scroll overflow-y-auto space-y-2 mb-2">
-                  {detectiveMessages.map((dm, i) => (<div key={i} className="text-xs"><span className="text-[var(--primary)] font-bold">[{dm.detectiveName}]:</span> <span className="text-[var(--foreground)]">{dm.text}</span></div>))}
+                  {detectiveMessages.map((dm, i) => (<div key={i} className="text-xs"><span className="text-[var(--primary)] font-bold">[{safeRender(dm.detectiveName)}]:</span> <span className="text-[var(--foreground)]">{safeRender(dm.text)}</span></div>))}
                   {detectiveMessages.length === 0 && <div className="text-xs text-[var(--muted-foreground)] italic text-center py-4">Sin mensajes privados</div>}
                 </div>
                 <form onSubmit={handleSendDetective} className="flex gap-1"><input value={detectiveDraft} onChange={(e) => setDetectiveDraft(e.target.value)} className="pixel-input flex-1 text-xs" placeholder="Mensaje privado..." /><button type="submit" className="pixel-btn text-xs px-2">ENVIAR</button></form>
@@ -1703,22 +1703,22 @@ export default function Home() {
                 const isSystem = msg.senderType === "system";
                 return (
                   <div key={`chat-${i}`} className={cn("flex flex-col", isDetective ? "items-start" : "items-end", isSystem && "items-center")}>
-                    {isSystem && <div className="text-[13px] text-[var(--muted-foreground)] italic text-center px-4 py-1.5 border border-[var(--border)] bg-[var(--accent)]">{msg.text}</div>}
+                    {isSystem && <div className="text-[13px] text-[var(--muted-foreground)] italic text-center px-4 py-1.5 border border-[var(--border)] bg-[var(--accent)]">{safeRender(msg.text)}</div>}
                     {isDetective && !isSystem && (
                       <div className="max-w-[80%]">
-                        <div className="text-[13px] text-[var(--primary)] tracking-wider mb-1">[Detective {msg.senderName} pregunta]</div>
-                        <div className="pixel-frame p-2.5 text-sm text-[var(--foreground)] border-l-2 border-l-[var(--primary)]">{msg.text}</div>
+                        <div className="text-[13px] text-[var(--primary)] tracking-wider mb-1">[Detective {safeRender(msg.senderName)} pregunta]</div>
+                        <div className="pixel-frame p-2.5 text-sm text-[var(--foreground)] border-l-2 border-l-[var(--primary)]">{safeRender(msg.text)}</div>
                       </div>
                     )}
                     {msg.senderType === "suspect" && (
                       <div className="max-w-[80%] pixel-message-in">
                         <div className="text-[13px] text-[var(--muted-foreground)] tracking-wider mb-1 text-right flex items-center justify-end gap-2">
                           <span className="pixel-badge">SOSPECHOSO</span>
-                          <span>[{msg.senderName || "SOSPECHOSO"}]</span>
+                          <span>[{safeRender(msg.senderName) || "SOSPECHOSO"}]</span>
                         </div>
                         <div className={cn("pixel-frame p-2.5 text-sm", msg.type === "suspect.autonomous" ? "text-[var(--muted-foreground)] italic border-r-2 border-r-[var(--border)]" : "text-[var(--foreground)] border-r-2 border-r-[#2a2a44]")}>
                           {msg.type === "suspect.autonomous" && <span className="text-xs text-[var(--muted-foreground)] tracking-wider block mb-1">*pensamiento autónomo*</span>}
-                          <TypewriterText text={msg.text} speed={22} />
+                          <TypewriterText text={safeRender(msg.text)} speed={22} />
                         </div>
                       </div>
                     )}
